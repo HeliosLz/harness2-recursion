@@ -1,0 +1,41 @@
+{
+  "name": "harness2-recursion",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Round-1 skeletons for the harness-level recursion pair: harness2-task-recursion and harness2-meta-recursion.",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "npm run build --workspace harness2-task-recursion && npm run build --workspace harness2-meta-recursion",
+    "typecheck": "npm run typecheck --workspace harness2-task-recursion && npm run typecheck --workspace harness2-meta-recursion",
+    "verify": "node --test test/loader-smoke.mjs packages/harness2-task-recursion/test/verify.mjs packages/harness2-meta-recursion/test/verify.mjs",
+    "verify:loader": "node --test test/loader-smoke.mjs",
+    "verify:task": "node --test packages/harness2-task-recursion/test/verify.mjs",
+    "verify:meta": "node --test packages/harness2-meta-recursion/test/verify.mjs",
+    "e2e": "node e2e/run.mjs"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "~4.0.5",
+    "@deepseek-ai/dsh-agent": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-agent-default-model": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-session": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
+    "@deepseek-ai/schemastery": "~3.18.5",
+    "@types/node": "^24.10.0",
+    "typescript": "^5.9.3",
+    "@deepseek-ai/dsh-token-meter": "0.2.1-rc.2"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "harness2",
+    "recursion"
+  ]
+}

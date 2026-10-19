@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Task Recursion",
+    "description": "Probes repeated task failures with a subagent, gates a safe compose step, and records versioned evidence in a local ledger."
+  }
+}

@@ -1,0 +1,13 @@
+# harness2-task-recursion — Profile patch layer (round-1 skeleton)
+#
+# The launcher appends this patch after the bundle layers. It inserts the
+# task-level recursion row. Every config default lives in the exported
+# Schemastery `Config` schema, so this row intentionally passes an empty
+# config object; edit it from Settings → Plugins to override defaults.
+#
+# Do not merge harness2-meta-recursion into this row: the two plugins are
+# separate packages by contract.
+- insert:
+    - id: harness2-task-recursion
+      name: harness2-task-recursion
+      config: {}

@@ -1,0 +1,5 @@
+node_modules/
+packages/*/lib/
+e2e/artifacts/
+e2e/.home/
+*.log

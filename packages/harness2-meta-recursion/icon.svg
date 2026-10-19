@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Meta recursion">
+  <rect width="64" height="64" rx="14" fill="#141033"/>
+  <path d="M32 11 52 22 32 33 12 22Z" fill="none" stroke="#a78bfa" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M12 32 32 43 52 32" fill="none" stroke="#818cf8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M12 41 32 52 52 41" fill="none" stroke="#c4b5fd" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="32" cy="22" r="3.5" fill="#facc15"/>
+</svg>
