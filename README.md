@@ -30,6 +30,11 @@ harness2-recursion/
     └── harness2-meta-recursion/    # 同上（13 项自检）
 ```
 
+## 社区讨论
+
+- 生态提案 Discussion（dsh 社区 `Show Your Plugins!`）：https://github.com/deepseek-ai/deepseek-harness/discussions/10324
+- 本仓库：https://github.com/HeliosLz/harness2-recursion
+
 ## 验证
 
 要求 Node ≥ 24（`node --test` 直接 import `src/index.ts`，依赖类型剥离）。
