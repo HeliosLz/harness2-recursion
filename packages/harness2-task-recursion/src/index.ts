@@ -1543,14 +1543,14 @@ function probeArmIo(runtime: TaskRuntime): ProbeArmIo {
   }
 }
 
-/** Build one no-edit control arm matched to a candidate body length. */
+/** Build one no-edit control arm matched to the treatment candidate's lengths. */
 function buildControlArm(input: {
   readonly taskId: string
   readonly cycleId: string
   readonly baseline: ProbeMetrics
   readonly replayScope: Config['replayScope']
   readonly trajectorySummary: string
-  readonly contentLength: number
+  readonly candidate: HarnessCandidate
 }) {
   return buildArmPrompt({
     taskId: input.taskId,
@@ -1558,12 +1558,13 @@ function buildControlArm(input: {
     baseline: input.baseline,
     replayScope: input.replayScope,
     trajectorySummary: input.trajectorySummary,
+    // The control mode substitutes same-length neutral tokens for every
+    // candidate field, so the treatment lengths (not fake control strings)
+    // must be used here.
     candidate: {
-      candidateId: `control-${input.cycleId}`,
-      candidateType: 'control',
-      component: 'neutral-component',
-      operation: 'no-op-control',
-      content: neutralPlaceholder(Math.max(1, input.contentLength), input.cycleId),
+      ...input.candidate.edit,
+      candidateId: input.candidate.candidateId,
+      candidateType: input.candidate.candidateType,
     },
     seed: input.cycleId,
   }, 'control')
@@ -1801,7 +1802,7 @@ async function runControlTrial(
     readonly cycleId: string
     readonly baseline: ProbeMetrics
     readonly trajectorySummary: string
-    readonly contentLength: number
+    readonly candidate: HarnessCandidate
   },
 ): Promise<{ metrics?: ProbeMetrics; tokenCost: number }> {
   const arm = buildControlArm({ ...input, replayScope: runtime.config.replayScope })
@@ -1879,14 +1880,14 @@ async function probeCandidates(
   const trials: TrialRecord[] = []
   const controlMetrics: ProbeMetrics[] = []
   let tokenCost = 0
-  const runControl = async (contentLength: number): Promise<void> => {
+  const runControl = async (candidate: HarnessCandidate): Promise<void> => {
     if (!budgetLeft(tokenCost)) return
     const result = await runControlTrial(runtime, parent, {
       taskId: input.taskId,
       cycleId: input.cycleId,
       baseline: input.baseline,
       trajectorySummary: input.trajectorySummary,
-      contentLength,
+      candidate,
     })
     tokenCost += result.tokenCost
     if (result.metrics !== undefined) controlMetrics.push(result.metrics)
@@ -1894,7 +1895,7 @@ async function probeCandidates(
 
   for (const candidate of input.candidates) {
     const isSim = simulable.includes(candidate)
-    if (isSim) await runControl(candidate.edit.content.length)
+    if (isSim) await runControl(candidate)
     if (trials.length > 0 && !budgetLeft(tokenCost)) {
       trials.push(invalidTrial(candidate, 'cost-limit'))
       continue
@@ -1905,7 +1906,7 @@ async function probeCandidates(
   }
   // Two control replicates are required by Gate-v4. With a single simulable
   // candidate, run the second control matched to its body length.
-  if (controlMetrics.length === 1) await runControl(simulable[0]!.edit.content.length)
+  if (controlMetrics.length === 1) await runControl(simulable[0]!)
 
   return { trials, controlMetrics, tokenCost }
 }

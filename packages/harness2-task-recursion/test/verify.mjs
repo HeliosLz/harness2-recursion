@@ -1249,6 +1249,9 @@ test('19. v4 cycle — controls, persona injection, gate receipt, applied branch
     assert.equal(applied.appliedComponents[0], 'system-prompt')
     const injected = handles.flatMap((handle) => handle.sections)
     assert.equal(injected.length, 4, 'two controls + two treatments each register a matched section')
+    // probeCandidates runs control→treatment per candidate: section lengths must pair up.
+    assert.equal(injected[0].text.length, injected[1].text.length)
+    assert.equal(injected[2].text.length, injected[3].text.length)
     assert.ok(injected.every((section) => section.name === 'deployment:persona-prefix'))
     const treatmentTexts = injected.filter((section) => section.text === PERSONA_CONTENT || section.text === PERSONA_CONTENT_2)
     assert.equal(treatmentTexts.length, 2)
