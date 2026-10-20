@@ -54,10 +54,29 @@ import {
   evaluateGateV4,
 } from './gate-v4.ts'
 import { buildArmPrompt, neutralPlaceholder, runProbeArm } from './probe-arm.ts'
+import {
+  EDIT_BODY_SCHEMA,
+  gcEditBodies,
+  rendererKindFor,
+  resolveEditsDir,
+  writeEditBody,
+  verifyEditBodies,
+} from './edit-store.ts'
+import type { EditBody } from './edit-store.ts'
 import type { ProbeArmIo } from './probe-arm.ts'
 import type { GateMetrics, GateV4Receipt } from './gate-v4.ts'
 
 export { COMPONENT_NAMES, LEGACY_COMPONENT_MIGRATION, isComponentName }
+export {
+  editBodyPath,
+  gcEditBodies,
+  readEditBody,
+  resolveEditsDir,
+  validateEditBody,
+  writeEditBody,
+  verifyEditBodies,
+} from './edit-store.ts'
+export type { EditBody, EditBodyGcOptions, EditBodyGcStats, RendererKind } from './edit-store.ts'
 export {
   ADMISSIBLE_OPERATIONS,
   FORBIDDEN_CONFIG_KEYS,
@@ -86,6 +105,8 @@ export const Config = Schema.object({
   repeatedFailureWindow: Schema.number().default(3),
   cooldownMs: Schema.number().default(60000),
   ledgerPath: Schema.string().default('./harness2-ledger.jsonl'),
+  /** PR-2 edit-body directory; empty derives `<dirname(ledgerPath)>/edits`. */
+  editsDir: Schema.string().default(''),
   maxCostPerCycle: Schema.number().default(50000),
   probeTimeoutMs: Schema.number().default(120000),
   replayScope: Schema.union([
@@ -2185,6 +2206,53 @@ export function buildAppliedEdits(candidates: readonly HarnessCandidate[]): Appl
   }))
 }
 
+/** True when the composed config has a writable edit-body directory. */
+function editsDirOf(config: Config): string {
+  return resolveEditsDir(config.editsDir, config.ledgerPath)
+}
+
+/** Persist every candidate body before Probe; failure fails the cycle closed. */
+async function storeProposalBodies(
+  runtime: TaskRuntime,
+  input: {
+    readonly taskId: string
+    readonly cycleId: string
+    readonly candidates: readonly HarnessCandidate[]
+  },
+): Promise<boolean> {
+  const editsDir = editsDirOf(runtime.config)
+  const createdAt = new Date().toISOString()
+  for (const candidate of input.candidates) {
+    const body: EditBody = {
+      schema: EDIT_BODY_SCHEMA,
+      contentHash: candidate.edit.contentHash,
+      candidateId: candidate.candidateId,
+      candidateType: candidate.candidateType,
+      component: candidate.edit.component,
+      operation: candidate.edit.operation,
+      content: candidate.edit.content,
+      renderer: { kind: rendererKindFor(candidate.edit.component, candidate.edit.operation), hints: {} },
+      taskId: input.taskId,
+      cycleId: input.cycleId,
+      createdAt,
+    }
+    const result = await writeEditBody(body, {
+      editsDir,
+      onError: (code, details) => reportError(runtime, code, details),
+    })
+    if (!result.ok) {
+      reportError(runtime, 'edit-store-write-failed', {
+        cycleId: input.cycleId,
+        candidateId: candidate.candidateId,
+        code: result.code,
+        error: result.error,
+      })
+      return false
+    }
+  }
+  return true
+}
+
 /** Classify one failed Propose attempt into the frozen reason union (R4-1). */
 export function classifyProposalFailure(error: unknown): {
   readonly reason: ProposeFailedReason
@@ -2261,6 +2329,32 @@ async function runComposeDecision(
     return
   }
 
+  const bodyCheck = await verifyEditBodies(editsDirOf(runtime.config), decision.candidates, {
+    onError: (code, details) => reportError(runtime, code, details),
+  })
+  if (!bodyCheck.ok) {
+    reportError(runtime, 'edit-body-missing', {
+      cycleId: input.probe.cycleId,
+      missing: bodyCheck.missing,
+      mismatched: bodyCheck.mismatched,
+    })
+    const rejectedIds = input.probe.trials.map((trial) => trial.candidateId)
+    await ledgerThenEmit(
+      runtime,
+      'compose/rejected',
+      () => ({
+        taskId: input.probe.taskId,
+        cycleId: input.probe.cycleId,
+        reason: 'compose-not-wired' as const,
+        rejectedCandidateIds: rejectedIds,
+        baselineMetrics: input.probe.baselineMetrics,
+        trials: input.probe.trials,
+      }),
+      validateComposeRejectedPayload,
+      (payload) => runtime.ctx.emit('compose/rejected', payload),
+    )
+    return
+  }
   const applyMode = await runtime.applyMode
   const appliedEdits = buildAppliedEdits(decision.candidates)
   const appliedComponents = decision.appliedComponents
@@ -2348,6 +2442,15 @@ async function runCycle(runtime: TaskRuntime, target: ProbeTarget): Promise<void
     }
     candidates = proposal.candidates
     spentTokens += proposal.tokenCost
+    // PR-2: bodies are durable before Probe. A write failure is fail-closed:
+    // no probe/compose event and no ledger append for this cycle.
+    if (!(await storeProposalBodies(runtime, {
+      taskId: target.taskId,
+      cycleId,
+      candidates,
+    }))) {
+      return
+    }
 
     const outcome = await probeCandidates(runtime, target.agent, {
       taskId: target.taskId,
@@ -2458,6 +2561,14 @@ export function apply(ctx: Context, config: Config): void {
     experience: undefined,
   }
 
+  // PR-2: best-effort body GC at activation; never blocks event wiring.
+  void gcEditBodies({
+    editsDir: editsDirOf(config),
+    ledgerPath: resolveStoragePath(config.ledgerPath),
+    onError: (code, details) => reportError(runtime, code, details),
+  }).catch((error: unknown) => {
+    reportError(runtime, 'edit-store-gc-failed', { error: String(error) })
+  })
   void readLedgerTail(config.ledgerPath)
     .then((tail) => {
       runtime.lastLedgerId.value = tail.id ?? null

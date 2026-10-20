@@ -64,7 +64,7 @@ node e2e/round6-spike/run-spike.mjs     # 隔离 profile：persona patch → wir
 npm install
 npm run build        # lib/index.js + lib/index.d.ts + lib/constants.js
 npm run typecheck
-npm run verify       # task 25 + meta 14 + loader smoke 5 = 44 项
+npm run verify       # task 31 + meta 14 + loader smoke 5 = 50 项
 npm run stage0       # Stage-0 证伪闸门（v3 复现，真实 pipeline，约 110s）
 npm run stage0:r6    # Gate-v4 live 负向验收（20 cycles，约 2 分钟）
 npm run stage0:r6:positive  # Gate-v4 live 正向验收（persona 必须被 applied）

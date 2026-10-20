@@ -279,3 +279,15 @@ interface ProposeFailedPayload {
 ### R6-5（Gate-v4 rejection 审计语义，PR-1.2）
 
 Gate-v4 的 `compose/rejected.rejectedCandidateIds` 为 **audit-complete**：列出该 cycle 全部 trials 的 candidateId，并与 `gate.rejectedCandidateIds` 完全一致；这与冻结的 Q3（`low-evidence` 取 valid trial ids、`regression` 取 best id）不同——**Q3 规则继续适用于 `gatePolicy: v3`/legacy**，v4 采用本修订。控制候选（non-simulable）仍以 `valid:false, applicability:'unavailable'` 的 trial 形式出现，保证 id 可审计。
+
+## 11. PR-2（edit-body sidecar，已实现）
+
+`compose/applied.appliedEdits` 仍只有 `{candidateId, contentHash, component, operation}`（冻结不变）；编辑正文持久化在内容寻址 sidecar：
+
+- `harness2-edit/v1`：`{schema, contentHash, candidateId, candidateType, component, operation, content, renderer:{kind,hints}, taskId, cycleId, createdAt}`；读取时重算 `sha256(content)`，不匹配 → `onError('edit-body-hash-mismatch')` 并拒绝。
+- 路径：`editsDir`（Config，默认空 → `<dirname(resolved ledgerPath)>/edits`）；文件 `<editsDir>/<64 hex>.json`；原子写（tmp→fsync→rename→fsync(dir)），`0o600`，同 hash+content 幂等，不同内容拒绝。
+- 时机：Propose 成功后、Probe 之前为所有候选写 body；写失败 → `onError('edit-store-write-failed')`，本 cycle 不 append/emit 任何事件。Compose apply 前用 `verifyEditBodies` 校验 body 存在且 hash 匹配；缺失 → 拒绝 apply，reason `compose-not-wired`。
+- 旧 ledger/Stage-0 fixture 无 body → `legacy-no-body`（不阻止 replay，不 backfill）。
+- GC：`gcEditBodies({editsDir, ledgerPath, maxAgeMs=7d, now})` 仅删除“过期且未被 `compose/applied.appliedEdits[].contentHash` 引用”的 `*.json`；非法文件名忽略；任何错误 `onError('edit-store-gc-failed')` 不抛出；ledger 缺失时跳过删除；apply() 激活时 best-effort 调用一次。
+- 内容寻址意味着**相同候选内容跨 cycle 只产生一个物理文件**；引用计数按 ledger/applied 记录，不是每 cycle 一份。
+- 不改 ledger 版本、bus 事件、`AppliedEdit`、`applyMode`、Q1–Q7/R4/R6 冻结项。

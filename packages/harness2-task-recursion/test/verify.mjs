@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -274,6 +274,7 @@ test('2. Config — round-3 defaults resolve', () => {
     repeatedFailureWindow: 3,
     cooldownMs: 60000,
     ledgerPath: './harness2-ledger.jsonl',
+    editsDir: '',
     maxCostPerCycle: 50000,
     probeTimeoutMs: 120000,
     replayScope: 'last-failed-step',
@@ -863,7 +864,7 @@ test('13. ledger failure — onError reported, no event emitted, nothing thrown'
         },
       },
     })
-    plugin.apply(stub.ctx, new plugin.Config({ ledgerPath: path.join(blocker, 'ledger.jsonl'), observeOnly: false, gatePolicy: 'v3' }))
+    plugin.apply(stub.ctx, new plugin.Config({ ledgerPath: path.join(blocker, 'ledger.jsonl'), editsDir: path.join(dir, 'edits'), observeOnly: false, gatePolicy: 'v3' }))
     const agent = makeAgent('parent-session')
     const listener = stub.listeners.get('agent/request-error')
     const signal = new AbortController().signal
@@ -883,7 +884,7 @@ test('13. ledger failure — onError reported, no event emitted, nothing thrown'
         llm: { stream: () => textStream('not json') },
       },
     })
-    plugin.apply(failedStub.ctx, new plugin.Config({ ledgerPath: path.join(blocker, 'ledger.jsonl') }))
+    plugin.apply(failedStub.ctx, new plugin.Config({ ledgerPath: path.join(blocker, 'ledger.jsonl'), editsDir: path.join(dir, 'edits') }))
     const failedAgent = makeAgent('failed-session')
     const failedListener = failedStub.listeners.get('agent/request-error')
     for (let index = 0; index < 3; index += 1) {
@@ -1275,6 +1276,7 @@ test('20. PR-1 packaging/harness pins — new modules packaged, stage0 pinned to
     'lib/admissibility.js', 'lib/admissibility.d.ts',
     'lib/gate-v4.js', 'lib/gate-v4.d.ts',
     'lib/probe-arm.js', 'lib/probe-arm.d.ts',
+    'lib/edit-store.js', 'lib/edit-store.d.ts',
   ]) {
     assert.ok(packageJson.files.includes(entry), `package files must include ${entry}`)
   }
@@ -1687,6 +1689,170 @@ test('27. pre-injection arm failure — trial is not marked applied and the gate
     } else {
       assert.equal(decisionRecord.payload.reason, 'low-evidence')
     }
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+
+/* 28 */
+test('28. edit-store — write/read, content addressed path, 0o600, idempotent, tamper rejected', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'h2-edit-store-'))
+  try {
+    const editsDir = path.join(dir, 'edits')
+    const body = {
+      schema: 'harness2-edit/v1',
+      contentHash: hashOf(PERSONA_CONTENT),
+      candidateId: 'cand-1',
+      candidateType: 'invariant',
+      component: 'system-prompt',
+      operation: 'set-persona-prefix',
+      content: PERSONA_CONTENT,
+      renderer: { kind: 'persona-prefix', hints: {} },
+      taskId: 'task-1',
+      cycleId: 'cycle-1',
+      createdAt: new Date().toISOString(),
+    }
+    const first = await plugin.writeEditBody(body, { editsDir })
+    assert.equal(first.ok, true)
+    assert.equal(first.written, true)
+    assert.equal(first.path, plugin.editBodyPath(editsDir, hashOf(PERSONA_CONTENT)))
+    assert.match(first.path, /[0-9a-f]{64}\.json$/)
+    const mode = (await stat(first.path)).mode & 0o777
+    assert.equal(mode, 0o600)
+    const read = await plugin.readEditBody(editsDir, hashOf(PERSONA_CONTENT))
+    assert.equal(read.ok, true)
+    assert.equal(read.body.content, PERSONA_CONTENT)
+    assert.equal(read.body.renderer.kind, 'persona-prefix')
+
+    // Idempotent: same content hash writes one file and reports written:false.
+    const second = await plugin.writeEditBody({ ...body, createdAt: new Date(Date.now() + 1000).toISOString() }, { editsDir })
+    assert.equal(second.ok, true)
+    assert.equal(second.written, false)
+    assert.equal((await readdir(editsDir)).filter((entry) => entry.endsWith('.json')).length, 1)
+
+    // Tampered content under the same hash is rejected on read.
+    const tampered = path.join(dir, 'tampered')
+    await mkdir(tampered, { recursive: true })
+    await writeFile(plugin.editBodyPath(tampered, hashOf(PERSONA_CONTENT)), `${JSON.stringify({ ...body, content: 'tampered content' })}\n`, 'utf8')
+    const mismatch = await plugin.readEditBody(tampered, hashOf(PERSONA_CONTENT))
+    assert.equal(mismatch.ok, false)
+    assert.equal(mismatch.code, 'hash-mismatch')
+    const missing = await plugin.readEditBody(tampered, hashOf('no body for this content'))
+    assert.equal(missing.ok, false)
+    assert.equal(missing.code, 'legacy-no-body')
+    assert.throws(() => plugin.editBodyPath(editsDir, 'not-a-hash'))
+
+    // Path derivation: explicit dir, absolute passthrough, and empty→dirname(ledger)/edits.
+    assert.equal(plugin.resolveEditsDir('/abs/edits', '/tmp/ledger.jsonl'), '/abs/edits')
+    assert.equal(plugin.resolveEditsDir('', '/tmp/dir/ledger.jsonl'), '/tmp/dir/edits')
+    const previousHome = process.env.DSH_HOME
+    process.env.DSH_HOME = dir
+    try {
+      assert.equal(plugin.resolveEditsDir('', './harness2-ledger.jsonl'), path.join(dir, 'harness2', 'edits'))
+      assert.equal(plugin.resolveEditsDir('custom-edits', './harness2-ledger.jsonl'), path.join(dir, 'harness2', 'custom-edits'))
+    } finally {
+      if (previousHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previousHome
+    }
+
+    // verifyEditBodies is the compose/applied pre-check.
+    const candidates = [{ candidateId: 'cand-1', edit: { contentHash: hashOf(PERSONA_CONTENT) } }]
+    assert.equal((await plugin.verifyEditBodies(editsDir, candidates)).ok, true)
+    const missingBodies = await plugin.verifyEditBodies(editsDir, [{ candidateId: 'x', edit: { contentHash: hashOf('absent') } }])
+    assert.equal(missingBodies.ok, false)
+    assert.equal(missingBodies.missing.length, 1)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+/* 29 */
+test('29. edit-store write failure — cycle fails closed before Probe/Compose', { timeout: 30000 }, async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'h2-edit-store-fail-'))
+  try {
+    const blocker = path.join(dir, 'blocker')
+    await writeFile(blocker, 'not a directory', 'utf8')
+    const stub = createStubContext({
+      services: {
+        agentDefaultModel: { currentSelection: () => ({ provider: 'fake', model: 'fake-model' }) },
+        llm: { stream: () => textStream(proposalJson()) },
+        agents: { current: () => ({ applyHarnessPatch: () => {} }), create: async () => childHandle([{ role: 'assistant', content: [{ type: 'text', text: 'ok' }] }]) },
+      },
+    })
+    plugin.apply(stub.ctx, new plugin.Config({
+      ledgerPath: path.join(dir, 'ledger.jsonl'),
+      editsDir: blocker,
+      observeOnly: false,
+      gatePolicy: 'v3',
+    }))
+    const agent = makeAgent('parent-body-fail')
+    const listener = stub.listeners.get('agent/request-error')
+    const signal = new AbortController().signal
+    for (let index = 0; index < 3; index += 1) {
+      await listener(
+        { agent, turn: 1, step: index + 1, provider: 'fake', failure: { message: 'failed', code: 'E' }, retryPolicy: undefined, signal },
+        async () => undefined,
+      )
+    }
+    await waitFor(async () => stub.logs.some(([level, message]) =>
+      level === 'warn' && String(message).includes('onError(edit-store-write-failed)')))
+    assert.deepEqual(stub.emitted, [], 'no probe/compose event when the body store fails')
+    await assert.rejects(readFile(path.join(dir, 'ledger.jsonl'), 'utf8'), 'no ledger append when the body store fails')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+/* 30 */
+test('30. edit-store GC — old unreferenced deleted; referenced/fresh/invalid kept; missing ledger safe', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'h2-edit-gc-'))
+  try {
+    const editsDir = path.join(dir, 'edits')
+    await mkdir(editsDir, { recursive: true })
+    const ledgerPath = path.join(dir, 'ledger.jsonl')
+    const referenced = hashOf('referenced content')
+    const orphanOld = hashOf('orphan old content')
+    const orphanNew = hashOf('orphan new content')
+    for (const [hash, content] of [[referenced, 'referenced content'], [orphanOld, 'orphan old content'], [orphanNew, 'orphan new content']]) {
+      const result = await plugin.writeEditBody({
+        schema: 'harness2-edit/v1',
+        contentHash: hash,
+        candidateId: 'cand-1',
+        candidateType: 'invariant',
+        component: 'system-prompt',
+        operation: 'set-persona-prefix',
+        content,
+        renderer: { kind: 'persona-prefix', hints: {} },
+        taskId: 'task-1',
+        cycleId: 'cycle-1',
+        createdAt: new Date().toISOString(),
+      }, { editsDir })
+      assert.equal(result.ok, true)
+    }
+    await writeFile(path.join(editsDir, 'not-a-body.txt'), 'ignore', 'utf8')
+    await writeFile(ledgerPath, `${JSON.stringify({
+      version: 'harness2-ledger/v3',
+      id: 'led-1',
+      event: 'compose/applied',
+      payload: { appliedEdits: [{ contentHash: referenced }] },
+    })}\n`, 'utf8')
+    const old = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000)
+    await utimes(plugin.editBodyPath(editsDir, orphanOld), old, old)
+    await utimes(plugin.editBodyPath(editsDir, referenced), old, old)
+    const stats = await plugin.gcEditBodies({ editsDir, ledgerPath, maxAgeMs: 24 * 60 * 60 * 1000 })
+    assert.equal(stats.deleted, 1)
+    assert.equal(stats.referenced, 1)
+    assert.equal(stats.kept, 2)
+    assert.ok(!(await readdir(editsDir)).includes(path.basename(plugin.editBodyPath(editsDir, orphanOld))))
+    assert.ok((await readdir(editsDir)).includes(path.basename(plugin.editBodyPath(editsDir, orphanNew))))
+    assert.ok((await readdir(editsDir)).includes(path.basename(plugin.editBodyPath(editsDir, referenced))))
+    assert.ok((await readdir(editsDir)).includes('not-a-body.txt'))
+
+    const missingLedger = await plugin.gcEditBodies({ editsDir, ledgerPath: path.join(dir, 'missing.jsonl') })
+    assert.equal(missingLedger.ledgerMissing, true)
+    assert.equal(missingLedger.deleted, 0)
+    assert.equal((await readdir(editsDir)).includes(path.basename(plugin.editBodyPath(editsDir, orphanNew))), true)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

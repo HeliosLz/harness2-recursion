@@ -98,3 +98,11 @@ Sessions: 2 (exit 0, final answer printed)
 - 仍待：PR-2 edit-body sidecar、PR-3 offline applier、PR-4 Gate-B harness、PR-5 meta verified-experience（当前 meta 仍消费 compose 决策）。
 
 - **PR-1.2（2026-10-20）**：per-candidate matched controls、control 失败不重试、receipt/validator 一致性、observe-only 只取证、pre-injection applicability 修复、Q3 v4 audit-complete 修订；`verify` 47/47，live 正/负向 PASS。见 [`docs/round-6-pr1.2.md`](docs/round-6-pr1.2.md)。
+
+## 八、Round-6 PR-2（edit-body sidecar，2026-10-21）
+
+- `harness2-edit/v1` 内容寻址 sidecar + 原子写/0o600/幂等 + hash 校验；
+- Propose 后、Probe 前写 body；失败 fail closed；apply 前 `verifyEditBodies`，缺失 → `compose-not-wired`；
+- GC 仅删除过期未引用 hex body，错误不抛出；legacy ledger 无 body → `legacy-no-body`；
+- 测试 28/29/30（任务包 31、总 50/50）；live 正/负向均 PASS，正/负向各有 2 个唯一 body 且所有引用 hash 均存在。
+- 偏差：内容寻址使“40 个物理 body”不可满足（实际 2 个唯一 body / 40 引用），详见 `docs/round-6-pr2.md`。

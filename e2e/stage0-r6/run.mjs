@@ -15,7 +15,8 @@
  * Env: STAGE0R6_CLI, STAGE0R6_PORT, STAGE0R6_CYCLES
  */
 import { spawn, spawnSync } from 'node:child_process'
-import { readFile, mkdir, rm, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { readFile, mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -31,6 +32,7 @@ const EXPERIENCE = path.join(ART, 'EXPERIENCE.md')
 const REQUESTS = path.join(ART, 'requests.jsonl')
 const CLIENT_LOG = path.join(ART, 'sessions.jsonl')
 const RESULTS = path.join(ART, 'RESULTS.json')
+const EDITS_DIR = path.join(ART, 'edits')
 const REPORT = path.join(HERE, MODE === 'positive' ? 'RESULTS-positive.md' : 'RESULTS.md')
 const CLI = process.env.STAGE0R6_CLI
   ?? '/tmp/dsh021/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js'
@@ -140,6 +142,7 @@ async function main() {
   await rm(HOME, { recursive: true, force: true })
   await mkdir(ART, { recursive: true })
   await mkdir(HOME, { recursive: true })
+  await rm(EDITS_DIR, { recursive: true, force: true })
   await rm(LEDGER, { force: true })
   await rm(EXPERIENCE, { force: true })
   await rm(REQUESTS, { force: true })
@@ -198,9 +201,33 @@ async function main() {
 
   const records = await readJsonl(LEDGER)
   const requestLog = await readJsonl(REQUESTS)
+  const bodyEntries = await readdir(EDITS_DIR).catch(() => [])
+  const bodyFiles = bodyEntries.filter((entry) => /^[0-9a-f]{64}\.json$/.test(entry))
+  const bodies = []
+  for (const entry of bodyFiles) {
+    try {
+      const body = JSON.parse(await readFile(path.join(EDITS_DIR, entry), 'utf8'))
+      const hash = `sha256:${createHash('sha256').update(body.content, 'utf8').digest('hex')}`
+      bodies.push({ body, valid: body.schema === 'harness2-edit/v1' && hash === body.contentHash })
+    } catch {
+      bodies.push({ body: null, valid: false })
+    }
+  }
   const probes = records.filter((record) => record.event === 'probe/completed')
   const applied = records.filter((record) => record.event === 'compose/applied')
   const rejected = records.filter((record) => record.event === 'compose/rejected')
+  const referencedEditHashes = new Set()
+  for (const probe of probes) for (const trial of probe.payload.trials) referencedEditHashes.add(trial.editContentHash)
+  for (const record of applied) for (const edit of record.payload.appliedEdits) referencedEditHashes.add(edit.contentHash)
+  const bodyHashes = new Set(bodies.filter((item) => item.valid).map((item) => item.body.contentHash))
+  const missingBodies = [...referencedEditHashes].filter((hash) => !bodyHashes.has(hash))
+  const appliedBodies = applied.flatMap((record) =>
+    record.payload.appliedEdits.map((edit) => {
+      const entry = bodyFiles.find((name) => name === `${edit.contentHash.slice(7)}.json`)
+      const match = bodies.find((item) => item.body?.contentHash === edit.contentHash)
+      return entry !== undefined && match?.valid === true
+    }))
+
   const cycles = new Set(probes.map((probe) => probe.payload.cycleId))
   const probeByCycle = new Map(probes.map((probe) => [probe.payload.cycleId, probe]))
   const rejectedCycles = new Set(rejected.map((record) => record.payload.cycleId))
@@ -257,6 +284,11 @@ async function main() {
     gateReceipts: gateReceipts.length,
     stableGateReceipts: stableGate.length,
     inadmissibleCandidates: inadmissible,
+    editBodies: bodyFiles.length,
+    validEditBodies: bodies.filter((item) => item.valid).length,
+    referencedEditHashes: referencedEditHashes.size,
+    missingEditBodies: missingBodies.length,
+    appliedBodies,
     fakeRequests: requestLog.length,
     probeRequests,
     expectedProbeRequests,
@@ -271,6 +303,11 @@ async function main() {
     ['one distinct cycle per session', cycles.size === CYCLES && probes.length === CYCLES],
     ['every compose record carries a gate/v4 receipt', gateReceipts.length === CYCLES],
     ['probe child requests match the mode', probeRequests === expectedProbeRequests],
+    // Content-addressed storage de-duplicates identical fixture candidates across cycles.
+    ['all bodies are content-addressed and hash-valid',
+      bodies.length === bodyFiles.length && bodies.every((item) => item.valid)
+        && bodyFiles.length === bodyHashes.size],
+    ['every referenced trial/applied hash has a body', missingBodies.length === 0],
   ]
   const modeChecks = MODE === 'negative'
     ? [
@@ -308,6 +345,7 @@ async function main() {
     `- controlMetrics lengths: ${JSON.stringify(summary.controlMetricsLengths)}; bad controls: ${summary.badControls} (expected ${expectedControls})`,
     `- rejected ids ⊆ trials: ${summary.rejectedIdsSubsetOfTrials}; gate/v4 receipts: ${summary.gateReceipts}`,
     `- inadmissible candidate receipts: ${summary.inadmissibleCandidates}`,
+    `- edit bodies: ${summary.editBodies} unique (${summary.validEditBodies} hash-valid), referenced hashes ${summary.referencedEditHashes}, missing ${summary.missingEditBodies}`,
     `- applied edit counts: ${JSON.stringify(summary.appliedEditCounts)}`,
     `- fake requests: ${JSON.stringify(summary.requestKinds)}`,
     `- elapsed: ${(summary.elapsedMs / 1000).toFixed(1)}s`,

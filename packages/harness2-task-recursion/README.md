@@ -34,6 +34,13 @@ export function apply(ctx, config)
 - **第四轮**：Propose 两次失败 → 终态事件 `propose/failed`（`reason ∈ llm-error/schema-invalid/hash-mismatch/component-invalid`、`attempts=2`、`lastError`、可选 baseline），账本 `event='propose/failed'`，append 成功后才 emit 且与同 cycleId 的 probe/compose 事件互斥；`rejectedCandidateIds` 只取 trials 中出现过的 id（R4-2）。
 - `TODO(ROUND2_APPLY)`（运行时补丁 API）、`TODO(ROUND2_SANDBOX)`（Probe 沙箱）保留。
 
+## Round-6 PR-2（edit-body sidecar）
+
+- Config `editsDir`（默认空 → `<dirname(ledgerPath)>/edits`）。
+- Propose 后为所有候选写 `harness2-edit/v1` 内容寻址 body；写失败 fail closed。
+- apply 前 `verifyEditBodies`；缺失 → `compose/rejected(compose-not-wired)`。
+- `gcEditBodies` 删除过期未引用 body，legacy ledger 无 body → `legacy-no-body`。
+
 ## Round-6 PR-1（Gate-v4）
 
 - 新配置：`gatePolicy: v4 | v3`（默认 v4；v3 仅供归档 replay）、`controlReplicates`（默认 2）、`maxAppliedEdits`（默认 1）。

@@ -7,9 +7,10 @@
 - controlMetrics lengths: [0]; bad controls: 0 (expected 0)
 - rejected ids ⊆ trials: true; gate/v4 receipts: 20
 - inadmissible candidate receipts: 40
+- edit bodies: 2 unique (2 hash-valid), referenced hashes 2, missing 0
 - applied edit counts: []
 - fake requests: {"main":80,"propose":20}
-- elapsed: 116.3s
+- elapsed: 116.6s
 
 ## Checks
 - PASS — every session exits 0
@@ -17,6 +18,8 @@
 - PASS — one distinct cycle per session
 - PASS — every compose record carries a gate/v4 receipt
 - PASS — probe child requests match the mode
+- PASS — all bodies are content-addressed and hash-valid
+- PASS — every referenced trial/applied hash has a body
 - PASS — 0 compose/applied for NULL/ADVERSARIAL
 - PASS — 20 compose/rejected records
 - PASS — all candidate receipts are inadmissible
