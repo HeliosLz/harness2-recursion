@@ -36,6 +36,19 @@ harness2-recursion/
 
 > 在该 P0 修复前，**请勿**把本原型的 COMPOSE/经验质量当作“自进化有效”的证据；它目前是取证与契约骨架，不是已验证的进化器。复现：`npm run stage0`（结果见 [`e2e/stage0/RESULTS.md`](e2e/stage0/RESULTS.md)）。
 
+## Round-6 设计（Offline profile-patch 闭环 + gate 修复）
+
+- 设计：[`docs/round-6-design.md`](docs/round-6-design.md)（arena 合成，base=candidate-1）
+- 合成记录：[`docs/round-6-synthesis.md`](docs/round-6-synthesis.md)
+- 可执行验证：[`docs/round-6-verification.md`](docs/round-6-verification.md) · [`e2e/round6-spike/`](e2e/round6-spike/README.md)
+
+```bash
+node e2e/round6-spike/gate-replay.mjs   # v4 gate 在真实 Stage-0 ledger 上 0/20 + quarantine 检查
+node e2e/round6-spike/run-spike.mjs     # 隔离 profile：persona patch → wire → byte-exact rollback
+```
+
+核心决定：拆分 **admission（会话内确定性准入）** 与 **certification（离线 held-out 认证）**；ledger 仍 v3、bus 仍 4 事件、meta 只从认证结果学习。设计尚未实现/冻结，需按 PR-1..PR-5 落地并跑 `stage0:r6`。
+
 ## 社区讨论
 
 - 生态提案 Discussion（dsh 社区 `Show Your Plugins!`）：https://github.com/deepseek-ai/deepseek-harness/discussions/10324
