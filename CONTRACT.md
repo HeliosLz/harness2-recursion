@@ -240,3 +240,10 @@ interface ProposeFailedPayload {
 4. `pre-step-patch` 在 dsh 0.2.1 无运行时 API → 环境依赖，保留 `TODO(ROUND2_APPLY)`。
 5. Probe 工具沙箱未强制 → 保留 `TODO(ROUND2_SANDBOX)`。
 6. profile 安装未执行（第四轮验收）。
+
+## 9b. 已知 P0 缺陷（Stage-0 实测，2026-10-20）
+
+**compose 门禁当前不具备内容辨别力**：在预注册的 Stage-0 实验（20 cycles，真实 headless pipeline）中，NULL edit 与 ADVERSARIAL edit 均被 `compose/applied` 采纳 20/20（100%），且 adversarial 条目进入 `EXPERIENCE.md` 的 accepted 经验。根因：trial 的 `completion` 恒为 true、baseline 恒为 false，且 `decideCompose` 只看 metrics/component，不检查编辑内容。
+
+- 复现：`npm run stage0`；结果 [e2e/stage0/RESULTS.md](e2e/stage0/RESULTS.md)。
+- **在第六轮修复 fitness 评估（recovery control arm / placebo 拒绝 / 内容校验）之前，禁止用 COMPOSE 或经验质量作为“自进化有效”的证据**；本次发现不改变已冻结的 confidence 公式与事件 schema，但明确标注其适用性前提。

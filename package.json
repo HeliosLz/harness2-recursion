@@ -17,7 +17,8 @@
     "verify:loader": "node --test test/loader-smoke.mjs",
     "verify:task": "node --test packages/harness2-task-recursion/test/verify.mjs",
     "verify:meta": "node --test packages/harness2-meta-recursion/test/verify.mjs",
-    "e2e": "node e2e/run.mjs"
+    "e2e": "node e2e/run.mjs",
+    "stage0": "node e2e/stage0/stage0.mjs"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "~4.0.5",
