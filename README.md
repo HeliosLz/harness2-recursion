@@ -49,7 +49,7 @@ node e2e/round6-spike/run-spike.mjs     # 隔离 profile：persona patch → wir
 
 核心决定：拆分 **admission（会话内确定性准入）** 与 **certification（离线 held-out 认证）**；ledger 仍 v3、bus 仍 4 事件、meta 只从认证结果学习。
 
-**PR-1 已实现并验收**（`docs/round-6-pr1.md`）：Gate-v4 admission + admissibility + 2 个真实 recovery controls + persona in-probe 注入；`npm run stage0:r6` 在真实 headless 上 20 cycles **compose/applied = 0**、每 cycle 2 条 control metrics。剩余：PR-2 edit-body sidecar、PR-3 offline applier、PR-4 Gate-B harness、PR-5 meta verified-experience。
+**PR-1 已实现并验收（含 adversarial review 修复）**（`docs/round-6-pr1.md`）：Gate-v4 admission + admissibility + 2 个真实 recovery controls + persona in-probe 注入；`npm run stage0:r6` 负向 20 cycles **0 applied**，`npm run stage0:r6:positive` 正向 **20/20 applied**、gate stable/controlCount=2、每 cycle 恰 1 edit。剩余：PR-2 edit-body sidecar、PR-3 offline applier、PR-4 Gate-B harness、PR-5 meta verified-experience。
 
 ## 社区讨论
 
@@ -64,12 +64,13 @@ node e2e/round6-spike/run-spike.mjs     # 隔离 profile：persona patch → wir
 npm install
 npm run build        # lib/index.js + lib/index.d.ts + lib/constants.js
 npm run typecheck
-npm run verify       # task 18 + meta 14 + loader smoke 5 = 37 项
+npm run verify       # task 21 + meta 14 + loader smoke 5 = 40 项
 npm run stage0       # Stage-0 证伪闸门（v3 复现，真实 pipeline，约 110s）
-npm run stage0:r6    # Gate-v4 live 验收（20 cycles，约 2 分钟）
+npm run stage0:r6    # Gate-v4 live 负向验收（20 cycles，约 2 分钟）
+npm run stage0:r6:positive  # Gate-v4 live 正向验收（persona 必须被 applied）
 ```
 
-本次结果（2026-10-20）：`npm run verify` **37/37 pass**；typecheck/build exit 0；`npm pack --dry-run` 清单齐全；真实会话 E2E 通过（见下）。
+本次结果（2026-10-20）：`npm run verify` **40/40 pass**；typecheck/build exit 0；`npm pack --dry-run` 清单齐全；真实会话 E2E 通过（见下）。
 
 ## 第三轮新增（相对第二轮）
 

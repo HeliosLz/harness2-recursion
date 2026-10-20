@@ -22,7 +22,11 @@ import { randomUUID } from 'node:crypto'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { PROPOSALS, proposeJson, sha256 } from './proposals.mjs'
+const proposalsModule = await import(
+  process.env.FAKE_PROPOSALS_FILE
+    ?? new URL('./proposals.mjs', import.meta.url).href
+)
+const { PROPOSALS, proposeJson, sha256 } = proposalsModule
 
 const PORT = Number(process.env.FAKE_PORT ?? 8841)
 const MAIN_FAILURES = Number(process.env.FAKE_FAILURES ?? 3)

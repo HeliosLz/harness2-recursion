@@ -1463,10 +1463,12 @@ export function metricsFromTranscript(
 ): ProbeMetrics {
   let toolFailures = 0
   let stepCount = 0
+  let assistantMessages = 0
   let chars = estimateTokens(promptText) * 4
   for (const message of messages) {
     if (message.role === 'assistant') {
       stepCount += 1
+      assistantMessages += 1
       for (const block of message.content) if (block.type === 'text') chars += 400
     }
     if (message.role === 'tool') {
@@ -1476,7 +1478,10 @@ export function metricsFromTranscript(
   }
   const measured = measureSessionTokens(ctx, agent.session)
   return {
-    completion: true,
+    // Round-6: a child that produced no assistant output did no observable work.
+    // Admission is not certification, but it must not treat a dead child as a
+    // successful trial.
+    completion: assistantMessages > 0,
     toolFailures,
     stepCount,
     tokenCost: measured ?? Math.ceil(chars / 4),
@@ -1686,6 +1691,12 @@ async function runTrial(
       durationMs,
       prompt,
     )
+    if (v4 && metrics.stepCount === 0) {
+      return {
+        trial: { ...baseTrial, applicability: 'applied', valid: false, error: 'empty-transcript' },
+        tokenCost: metrics.tokenCost,
+      }
+    }
     const assistantText = lastAssistantText(child.agent)
     return {
       trial: {
@@ -1747,6 +1758,9 @@ async function runControlTrial(
       durationMs,
       prompt,
     )
+    if (metrics.stepCount === 0 || !metrics.completion) {
+      return { tokenCost: metrics.tokenCost }
+    }
     return {
       metrics,
       tokenCost: metrics.tokenCost + estimateTokens(lastAssistantText(child.agent)),

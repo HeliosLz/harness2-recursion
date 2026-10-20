@@ -144,6 +144,7 @@ function patchYaml() {
   name: harness2-task-recursion
   config:
     observeOnly: false
+    gatePolicy: v3
     ledgerPath: ${LEDGER}
     proposeModel: faketest/propose-model
     triggerThreshold: 3
@@ -250,6 +251,7 @@ async function setupProfile() {
     'model: main-model',
     'mode: always',
     'disabled: true',
+    'gatePolicy: v3',
   ]
   const checks = required.map((needle) => ({ needle, present: dumpText.includes(needle) }))
   const missing = checks.filter((check) => !check.present)

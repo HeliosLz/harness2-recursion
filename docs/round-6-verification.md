@@ -66,3 +66,12 @@ elapsed: 116.7s
 ```
 
 这补上了设计验证中“live RCA 未测”的缺口：每 cycle 都有 2 个真实 recovery control，且 NULL/ADVERSARIAL 0 applied。详见 [`round-6-pr1.md`](round-6-pr1.md) 与 [`e2e/stage0-r6/RESULTS.md`](../e2e/stage0-r6/RESULTS.md)。
+
+## 5. PR-1 review 修复后的 live 复跑（追加）
+
+| 模式 | 命令 | 结果 |
+| :-- | :-- | :-- |
+| negative | `npm run stage0:r6` | PASS：20 cycles，**0 applied / 20 rejected**，每 cycle 2 controls，gate `controlCount=2 && stable=true` |
+| positive | `npm run stage0:r6:positive` | PASS：20 cycles，**20/20 applied**，每 cycle 恰 1 canonical persona edit，probe 80（2 controls + 2 trials） |
+
+这两条把“gate 只会拒绝”的验证缺口补上：positive 臂证明 admissible persona 会经 `systemPrompt.section` 注入、trial 有效并被 applied。

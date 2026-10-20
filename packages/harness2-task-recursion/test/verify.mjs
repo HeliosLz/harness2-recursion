@@ -106,6 +106,31 @@ function usageStream(text, totalTokens) {
   })()
 }
 
+function personaProposalJson() {
+  return JSON.stringify({
+    candidates: [
+      {
+        candidateType: 'invariant',
+        edit: {
+          component: 'system-prompt',
+          operation: 'set-persona-prefix',
+          content: PERSONA_CONTENT,
+          contentHash: hashOf(PERSONA_CONTENT),
+        },
+      },
+      {
+        candidateType: 'domain',
+        edit: {
+          component: 'system-prompt',
+          operation: 'set-persona-prefix',
+          content: PERSONA_CONTENT_2,
+          contentHash: hashOf(PERSONA_CONTENT_2),
+        },
+      },
+    ],
+  })
+}
+
 function proposalJson() {
   const build = (candidateType, component, operation, content) => ({
     candidateType,
@@ -121,8 +146,14 @@ function proposalJson() {
 
 function childHandle(messages) {
   const followups = []
+  const sections = []
   const child = {
     options: {},
+    ctx: {
+      get: (name) => (name === 'systemPrompt'
+        ? { section: (section) => { sections.push(section); return () => {} } }
+        : undefined),
+    },
     session: {
       header: { id: `child-${Math.random().toString(16).slice(2)}`, origin: 'subagent', isSeeded: false },
       deriveMessages: () => messages,
@@ -134,6 +165,7 @@ function childHandle(messages) {
   return {
     agent: child,
     followups,
+    sections,
     dispose: async () => {},
   }
 }
@@ -154,6 +186,8 @@ function goodTrialMetrics(overrides = {}) {
   return metrics({ completion: true, toolFailures: 0, stepCount: 2, tokenCost: 50, ...overrides })
 }
 
+const PERSONA_CONTENT = 'You are a coding agent that checks the failing command and reports the first error before retrying.'
+const PERSONA_CONTENT_2 = 'You are a coding agent that verifies the failing step and reports a concise diagnosis before retrying.'
 const CONTENT = 'patch content'
 const CANDIDATE_ID = 'cand-1'
 
@@ -913,6 +947,13 @@ test('16. admissibility — canonical operations only, deny phrases, forbidden k
   assert.equal(ok('plugins', 'set-harness2-config', JSON.stringify({ key: 'metricWeights', value: 1 })).code, 'config-key-not-allowed')
   assert.equal(ok('plugins', 'set-harness2-config', JSON.stringify({ key: 'gatePolicy', value: 1 })).code, 'config-key-not-allowed')
   assert.equal(ok('plugins', 'set-harness2-config', JSON.stringify({ key: 'triggerThreshold', value: 99 })).ok, false)
+  // Prototype-chain safety: inherited names must never be accepted or throw.
+  for (const key of ['__proto__', 'constructor', 'toString', 'valueOf', 'hasOwnProperty']) {
+    const result = ok('plugins', 'set-harness2-config', JSON.stringify({ key, value: 4 }))
+    assert.equal(result.ok, false, `inherited config key ${key} must be rejected`)
+    assert.equal(ok(key, 'set-persona-prefix', 'You are a valid agent that does the task.').ok, false)
+  }
+  assert.equal(ok('plugins', 'set-harness2-config', JSON.stringify({ key: 'maxAppliedEdits', value: 2 })).ok, true)
   assert.equal(plugin.isSimulableInProbe({ component: 'system-prompt', operation: 'set-persona-prefix' }), true)
   assert.equal(plugin.isSimulableInProbe({ component: 'system-prompt', operation: 'set-persona-suffix' }), false)
   assert.equal(plugin.isSimulableInProbe({ component: 'tool-guidance', operation: 'set-tool-order' }), false)
@@ -956,6 +997,32 @@ test('17. gate v4 — fail-closed controls, admissibility, deadband, token guard
   assert.equal(nullEdit.reason, 'regression')
   assert.equal(nullEdit.gate.candidates[0].admissible, false)
 
+  const completionRegression = plugin.evaluateGateV4({
+    controls: [controlMetrics(), controlMetrics()],
+    candidates: [{
+      candidateId: 'c',
+      component: 'system-prompt',
+      operation: 'set-persona-prefix',
+      content: 'You are a coding agent that checks the failing command before retrying.',
+      trial: { valid: true, applicability: 'applied', metrics: goodTrialMetrics({ completion: false, toolFailures: 0, stepCount: 2, tokenCost: 1000 }) },
+    }],
+  })
+  assert.equal(completionRegression.kind, 'reject')
+  assert.equal(completionRegression.gate.candidates[0].regressed, true)
+
+  const missingApplicability = plugin.evaluateGateV4({
+    controls: [controlMetrics(), controlMetrics()],
+    candidates: [{
+      candidateId: 'm',
+      component: 'system-prompt',
+      operation: 'set-persona-prefix',
+      content: 'You are a coding agent that checks the failing command before retrying.',
+      trial: { valid: true, metrics: goodTrialMetrics({ tokenCost: 1000 }) },
+    }],
+  })
+  assert.equal(missingApplicability.kind, 'reject')
+  assert.equal(missingApplicability.gate.candidates[0].applicable, false)
+
   const unavailable = plugin.evaluateGateV4({
     controls: [controlMetrics(), controlMetrics()],
     candidates: [{ ...personaCandidate('u'), trial: { valid: false, applicability: 'unavailable' } }],
@@ -994,6 +1061,24 @@ test('17. gate v4 — fail-closed controls, admissibility, deadband, token guard
   })
   assert.equal(twoAllowed.kind, 'apply')
   assert.equal(twoAllowed.appliedCandidateIds.length, 2)
+})
+
+/* 17b */
+test('17b. metricsFromTranscript — no assistant output is not completion', () => {
+  const stubCtx = { get: () => undefined }
+  const agent = { session: { header: { id: 'child' }, deriveMessages: () => [] } }
+  const empty = plugin.metricsFromTranscript(stubCtx, agent, [], 10, 'prompt')
+  assert.equal(empty.completion, false)
+  assert.equal(empty.stepCount, 0)
+  const worked = plugin.metricsFromTranscript(
+    stubCtx,
+    agent,
+    [{ role: 'assistant', content: [{ type: 'text' }] }],
+    10,
+    'prompt',
+  )
+  assert.equal(worked.completion, true)
+  assert.equal(worked.stepCount, 1)
 })
 
 /* 18 */
@@ -1058,4 +1143,80 @@ test('18. archived Stage-0 replay — v3 reproduces 20/20, v4 admits 0/20 (fail 
       assert.ok(byHash.has(edit.contentHash))
     }
   }
+})
+
+
+/* 19 */
+test('19. v4 cycle — controls, persona injection, gate receipt, applied branch', { timeout: 30000 }, async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'h2-task-v4-'))
+  try {
+    const handles = []
+    const stub = createStubContext({
+      services: {
+        agentDefaultModel: { currentSelection: () => ({ provider: 'fake', model: 'fake-model' }) },
+        llm: { stream: () => usageStream(personaProposalJson(), 500) },
+        tokenMeter: { measure: () => ({ totalTokens: 1234 }) },
+        agents: {
+          current: () => ({ applyHarnessPatch: () => {} }),
+          create: async () => {
+            const handle = childHandle([{ role: 'assistant', content: [{ type: 'text', text: 'stage0 replay complete' }] }])
+            handles.push(handle)
+            return handle
+          },
+        },
+        harness2Experience: { ready: true, queryPriors: () => ({ priors: [], totalMatched: 0 }) },
+      },
+    })
+    plugin.apply(stub.ctx, makeConfig(dir, { observeOnly: false, controlReplicates: 2 }))
+    const agent = makeAgent('parent-v4')
+    const listener = stub.listeners.get('agent/request-error')
+    const signal = new AbortController().signal
+    for (let index = 0; index < 3; index += 1) {
+      await listener(
+        { agent, turn: 1, step: index + 1, provider: 'fake', failure: { message: 'command failed', code: 'TOOL_FAILED' }, retryPolicy: undefined, signal },
+        async () => undefined,
+      )
+    }
+    await waitFor(async () => {
+      try {
+        const text = await readFile(path.join(dir, 'ledger.jsonl'), 'utf8')
+        return text.trim().split('\n').filter(Boolean).length >= 2
+      } catch { return false }
+    })
+    const envelopes = (await readFile(path.join(dir, 'ledger.jsonl'), 'utf8'))
+      .trim().split('\n').filter(Boolean).map((line) => JSON.parse(line))
+    assert.deepEqual(envelopes.map((envelope) => envelope.event), ['probe/completed', 'compose/applied'])
+    const probe = envelopes[0].payload
+    assert.equal(probe.controlMetrics.length, 2)
+    assert.deepEqual(probe.trials.map((trial) => trial.applicability), ['applied', 'applied'])
+    assert.ok(probe.trials.every((trial) => trial.valid === true))
+    const applied = envelopes[1].payload
+    assert.equal(applied.gate.version, 'gate/v4')
+    assert.equal(applied.gate.controlCount, 2)
+    assert.equal(applied.gate.stable, true)
+    assert.equal(applied.appliedEdits.length, 1)
+    assert.equal(applied.appliedComponents.length, 1)
+    assert.equal(applied.appliedComponents[0], 'system-prompt')
+    const injected = handles.flatMap((handle) => handle.sections)
+    assert.ok(injected.length >= 2)
+    assert.ok(injected.every((section) => section.name === 'deployment:persona-prefix'))
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+
+/* 20 */
+test('20. PR-1 packaging/harness pins — new modules packaged, stage0 pinned to v3', async () => {
+  const packageJson = JSON.parse(await readFile(path.join(packageRoot, 'package.json'), 'utf8'))
+  for (const entry of [
+    'lib/admissibility.js', 'lib/admissibility.d.ts',
+    'lib/gate-v4.js', 'lib/gate-v4.d.ts',
+  ]) {
+    assert.ok(packageJson.files.includes(entry), `package files must include ${entry}`)
+  }
+  const stage0 = await readFile(path.join(packageRoot, '..', '..', 'e2e', 'stage0', 'stage0.mjs'), 'utf8')
+  assert.match(stage0, /gatePolicy:\s*v3/, 'archived Stage-0 harness must pin gatePolicy v3')
+  const stage0r6 = await readFile(path.join(packageRoot, '..', '..', 'e2e', 'stage0-r6', 'run.mjs'), 'utf8')
+  assert.match(stage0r6, /gatePolicy:\s*v4/, 'live Gate-v4 runner must pin gatePolicy v4')
 })

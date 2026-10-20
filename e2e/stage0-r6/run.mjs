@@ -21,21 +21,24 @@ import { fileURLToPath } from 'node:url'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const REPO = path.resolve(HERE, '..', '..')
-const HOME = path.join(HERE, 'home')
-const PROFILE = 'stage0r6'
+const MODE = process.env.STAGE0R6_MODE === 'positive' ? 'positive' : 'negative'
+const HOME = path.join(HERE, `home-${MODE}`)
+const PROFILE = MODE === 'positive' ? 'stage0r6pos' : 'stage0r6'
 const PROFILE_DIR = path.join(HOME, 'profiles', PROFILE)
-const ART = path.join(HERE, 'artifacts')
+const ART = path.join(HERE, 'artifacts', MODE)
 const LEDGER = path.join(ART, 'ledger.jsonl')
 const EXPERIENCE = path.join(ART, 'EXPERIENCE.md')
 const REQUESTS = path.join(ART, 'requests.jsonl')
 const CLIENT_LOG = path.join(ART, 'sessions.jsonl')
 const RESULTS = path.join(ART, 'RESULTS.json')
-const REPORT = path.join(HERE, 'RESULTS.md')
+const REPORT = path.join(HERE, MODE === 'positive' ? 'RESULTS-positive.md' : 'RESULTS.md')
 const CLI = process.env.STAGE0R6_CLI
   ?? '/tmp/dsh021/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js'
 const PORT = Number(process.env.STAGE0R6_PORT ?? 8855)
 const CYCLES = Number(process.env.STAGE0R6_CYCLES ?? 20)
 const FAKE_SERVER = path.join(REPO, 'e2e', 'stage0', 'fake-model-server.mjs')
+const FAKE_PROPOSALS_FILE = path.join(HERE, 'personas.mjs')
+const { PROPOSALS: PERSONAS } = await import('./personas.mjs')
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const log = (message) => console.log(`[stage0-r6] ${message}`)
@@ -165,6 +168,7 @@ async function main() {
       FAKE_SLOW_MIN_MS: '2500',
       FAKE_SLOW_MAX_MS: '3500',
       FAKE_LOG: REQUESTS,
+      ...(MODE === 'positive' ? { FAKE_PROPOSALS_FILE } : {}),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -211,53 +215,84 @@ async function main() {
     const ids = new Set(probeByCycle.get(record.payload.cycleId)?.payload.trials.map((trial) => trial.candidateId) ?? [])
     return record.payload.rejectedCandidateIds.length > 0 && record.payload.rejectedCandidateIds.every((id) => ids.has(id))
   })
-  const gateReceipts = rejected.filter((record) => record.payload.gate?.version === 'gate/v4')
-  const admissions = rejected.flatMap((record) => record.payload.gate?.candidates ?? [])
-  const nullAdmissible = admissions.filter((item) => !item.admissible).length
-  const sessionsWithoutCycle = sessions.filter((session) => session.recordsAdded < 2)
+  const composeRecords = [...applied, ...rejected]
+  const gateReceipts = composeRecords.filter((record) => record.payload.gate?.version === 'gate/v4')
+  const stableGate = gateReceipts.filter((record) => record.payload.gate.stable === true
+    && record.payload.gate.controlCount === 2)
+  const admissions = gateReceipts.flatMap((record) => record.payload.gate?.candidates ?? [])
+  const inadmissible = admissions.filter((item) => !item.admissible).length
+  const appliedEditCounts = applied.map((record) => record.payload.appliedEdits.length)
+  const sessionsWithoutCycle = sessions.filter((session) => session.recordsAdded !== 2)
+  const failedSessions = sessions.filter((session) => session.exit !== 0)
+  const probeRequests = requestLog.filter((request) => request.kind === 'probe').length
+  const expectedProbeRequests = CYCLES * (MODE === 'positive' ? 4 : 2)
 
   const summary = {
+    mode: MODE,
     generatedAt: new Date().toISOString(),
     elapsedMs: Date.now() - startedAt,
     sessions: sessions.length,
+    failedSessions: failedSessions.length,
     sessionsWithoutCycle: sessionsWithoutCycle.length,
     ledgerRecords: records.length,
     cycles: cycles.size,
     probeCompleted: probes.length,
     composeApplied: applied.length,
     composeRejected: rejected.length,
-    rejectedCycles: rejectedCycles.size,
+    appliedEditCounts,
     controlMetricsLengths: [...new Set(controls)].sort(),
     badControls: badControls.length,
     rejectedIdsSubsetOfTrials: trialIdsValid,
     gateReceipts: gateReceipts.length,
-    inadmissibleCandidates: nullAdmissible,
+    stableGateReceipts: stableGate.length,
+    inadmissibleCandidates: inadmissible,
     fakeRequests: requestLog.length,
+    probeRequests,
+    expectedProbeRequests,
     requestKinds: requestLog.reduce((accumulator, request) => {
       accumulator[request.kind ?? 'unknown'] = (accumulator[request.kind ?? 'unknown'] ?? 0) + 1
       return accumulator
     }, {}),
   }
-  const checks = [
-    ['every session produced one cycle', sessionsWithoutCycle.length === 0],
-    ['20 probe/completed records', probes.length === CYCLES],
-    ['0 compose/applied for NULL/ADVERSARIAL', applied.length === 0],
-    ['20 compose/rejected records', rejected.length === CYCLES],
+  const baseChecks = [
+    ['every session exits 0', failedSessions.length === 0],
+    ['every session produced exactly one cycle (2 records)', sessionsWithoutCycle.length === 0],
+    ['one distinct cycle per session', cycles.size === CYCLES && probes.length === CYCLES],
     ['every cycle has exactly 2 recovery controls', badControls.length === 0],
-    ['every rejection id exists in the same payload trials', trialIdsValid],
-    ['every rejection carries a gate/v4 receipt', gateReceipts.length === CYCLES],
-    ['all candidate receipts are inadmissible', nullAdmissible === CYCLES * 2],
+    ['every compose record carries a gate/v4 receipt', gateReceipts.length === CYCLES],
+    ['every gate receipt has controlCount=2 and stable=true', stableGate.length === CYCLES],
+    ['probe child requests match the mode', probeRequests === expectedProbeRequests],
   ]
+  const modeChecks = MODE === 'negative'
+    ? [
+        ['0 compose/applied for NULL/ADVERSARIAL', applied.length === 0],
+        ['20 compose/rejected records', rejected.length === CYCLES],
+        ['all candidate receipts are inadmissible', inadmissible === CYCLES * 2],
+        ['every rejection id exists in the same payload trials', trialIdsValid],
+      ]
+    : [
+        [`positive-control persona applied in >= 18 cycles (got ${applied.length})`, applied.length >= 18],
+        ['every applied cycle records exactly one edit', appliedEditCounts.length > 0
+          && appliedEditCounts.every((count) => count === 1)],
+        ['every applied edit is a canonical persona hash',
+          applied.every((record) => record.payload.appliedEdits.every((edit) =>
+            PERSONAS.some((persona) => persona.contentHash === edit.contentHash)))],
+        ['applied receipts show admitted candidates',
+          applied.every((record) => record.payload.gate?.candidates.some((item) => item.admitted === true))],
+      ]
+  const checks = [...baseChecks, ...modeChecks]
   const passed = checks.every(([, ok]) => ok)
   const report = [
-    '# Stage-0 v4 live acceptance (PR-1)',
+    `# Stage-0 v4 live acceptance (PR-1, ${MODE} arm)`,
     '',
+    `- Mode: **${MODE}**`,
     `- Result: **${passed ? 'PASS' : 'FAIL'}**`,
     `- Cycles: ${summary.cycles} (sessions ${summary.sessions})`,
     `- probe/completed: ${summary.probeCompleted}; compose/applied: **${summary.composeApplied}**; compose/rejected: ${summary.composeRejected}`,
     `- controlMetrics lengths: ${JSON.stringify(summary.controlMetricsLengths)}; bad controls: ${summary.badControls}`,
     `- rejected ids ⊆ trials: ${summary.rejectedIdsSubsetOfTrials}; gate/v4 receipts: ${summary.gateReceipts}`,
     `- inadmissible candidate receipts: ${summary.inadmissibleCandidates}`,
+    `- applied edit counts: ${JSON.stringify(summary.appliedEditCounts)}`,
     `- fake requests: ${JSON.stringify(summary.requestKinds)}`,
     `- elapsed: ${(summary.elapsedMs / 1000).toFixed(1)}s`,
     '',
@@ -266,7 +301,7 @@ async function main() {
     '',
   ].join('\n')
   await writeFile(RESULTS, `${JSON.stringify({ summary, checks, sessions }, null, 2)}\n`, 'utf8')
-  await writeFile(REPORT, report, 'utf8')
+  if (passed) await writeFile(REPORT, report, 'utf8')
   console.log(report)
   if (!passed) process.exitCode = 1
 }
@@ -277,8 +312,9 @@ try {
   const message = error instanceof Error ? `${error.message}\n${error.stack ?? ''}` : String(error)
   console.error(`[stage0-r6] FAILED: ${message}`)
   await mkdir(ART, { recursive: true })
-  await writeFile(RESULTS, `${JSON.stringify({ status: 'BLOCKED', error: message }, null, 2)}\n`, 'utf8')
-  await writeFile(REPORT, `# Stage-0 v4 live acceptance\n\nStatus: **BLOCKED**\n\n\`\`\`\n${message}\n\`\`\`\n`, 'utf8')
+  await writeFile(RESULTS, `${JSON.stringify({ status: 'BLOCKED', mode: MODE, error: message }, null, 2)}\n`, 'utf8')
+  await writeFile(path.join(ART, 'REPORT-failed.md'), `# Stage-0 v4 live acceptance (${MODE})\n\nStatus: **BLOCKED**\n\n\`\`\`\n${message}\n\`\`\`\n`, 'utf8')
+  console.error(`[stage0-r6] failure report kept in ${ART} (tracked RESULTS not touched)`)
   process.exitCode = 1
 } finally {
   if (server !== null) {

@@ -90,7 +90,9 @@ Sessions: 2 (exit 0, final answer printed)
 ## 七、Round-6 PR-1（Gate-v4 admission，2026-10-20）
 
 - 实现：admissibility predicate + Gate-v4（2 个真实 recovery control、deadband、token guard、fail-closed）+ persona in-probe 注入 + canonical PROPOSE_SYSTEM。
-- 自动化：`npm run verify` **37/37**；归档 Stage-0 replay **v3 20/20 → v4 0/20**（无 control 的旧 payload 全部 `low-evidence`，无静默回退）。
-- Live `npm run stage0:r6`：**PASS**，20 cycles / 20 sessions，**compose/applied = 0**，20 个 compose/rejected，每 cycle 恰 2 条 control metrics，40/40 candidate receipt 不可准入，`gate/v4` receipts 20/20，116.7s。
+- 自动化：`npm run verify` **40/40**；归档 Stage-0 replay **v3 20/20 → v4 0/20**（无 control 的旧 payload 全部 `low-evidence`，无静默回退）。
+- Live 负向 `npm run stage0:r6`：**PASS**，20 cycles，**0 applied** / 20 rejected，每 cycle 恰 2 controls，gate stable/controlCount=2。
+- Live 正向 `npm run stage0:r6:positive`：**PASS**，**20/20 applied**，每 cycle 恰 1 canonical persona edit，probe 80（2 controls + 2 trials），gate receipts 20/20。
+- 经 interrogate adversarial review 修复 Act 1–5（stage0 v3 pin、package files、原型链、completion/applicability、v4 正向测试/positive arm），详见 `docs/round-6-pr1.md` §6。
 - 证据：[`docs/round-6-pr1.md`](docs/round-6-pr1.md)、[`e2e/stage0-r6/RESULTS.md`](e2e/stage0-r6/RESULTS.md)。
 - 仍待：PR-2 edit-body sidecar、PR-3 offline applier、PR-4 Gate-B harness、PR-5 meta verified-experience（当前 meta 仍消费 compose 决策）。

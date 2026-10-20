@@ -155,8 +155,10 @@ function checkHarness2Config(content: string): AdmissibilityCode | undefined {
   if (keys.length !== 2 || !('key' in record) || !('value' in record)) return 'config-value-not-allowed'
   const key = record.key
   if (typeof key !== 'string' || FORBIDDEN_CONFIG_KEYS.includes(key)) return 'config-key-not-allowed'
+  // Object.hasOwn: never consult the prototype chain (__proto__/constructor/...).
+  if (!Object.hasOwn(TUNABLE_HARNESS2_KEYS, key)) return 'config-key-not-allowed'
   const range = TUNABLE_HARNESS2_KEYS[key]
-  if (range === undefined) return 'config-key-not-allowed'
+  if (!Array.isArray(range)) return 'config-key-not-allowed'
   const candidate = record.value
   if (typeof candidate !== 'number' || !Number.isFinite(candidate)) return 'config-value-not-allowed'
   if (candidate < range[0] || candidate > range[1]) return 'config-value-not-allowed'
@@ -173,11 +175,13 @@ export function checkAdmissibility(
   operation: unknown,
   content: unknown,
 ): Admissibility {
-  if (typeof component !== 'string' || !(component in ADMISSIBLE_OPERATIONS)) {
+  if (typeof component !== 'string' || !Object.hasOwn(ADMISSIBLE_OPERATIONS, component)) {
     return fail('component-not-renderable')
   }
   const patchComponent = component as PatchComponent
-  if (typeof operation !== 'string' || !ADMISSIBLE_OPERATIONS[patchComponent].includes(operation as PatchOperation)) {
+  const allowedOperations = ADMISSIBLE_OPERATIONS[patchComponent]
+  if (!Array.isArray(allowedOperations) || typeof operation !== 'string'
+    || !allowedOperations.includes(operation as PatchOperation)) {
     return fail('operation-not-allowlisted')
   }
   const patchOperation = operation as PatchOperation

@@ -2,7 +2,7 @@
 
 - 日期：2026-10-20
 - 范围：`admissibility` + `Gate-v4` + 恢复对照臂（RCA）+ canonical `PROPOSE_SYSTEM` + 归档 replay/无 control fail-closed 测试 + live `stage0:r6`
-- 状态：**已实现并验收**；未包含 PR-2（edit-body sidecar）、PR-3（offline applier）、PR-4（Gate-B harness）、PR-5（meta 只从认证学习）
+- 状态：**已实现、经 adversarial review 修复后验收**；未包含 PR-2（edit-body sidecar）、PR-3（offline applier）、PR-4（Gate-B harness）、PR-5（meta 只从认证学习）
 
 ## 1. 代码改动
 
@@ -32,10 +32,10 @@
 ### 自动化（`npm run verify`）
 
 ```
-tests 37, pass 37, fail 0
+tests 40, pass 40, fail 0
 ```
 
-- 任务包测试 18 项；其中归档 replay：**v3 20/20 applied → v4 0/20 applied**，原因全部 `low-evidence`（无 control 的旧 payload fail closed）。
+- 任务包测试 21 项；其中归档 replay：**v3 20/20 applied → v4 0/20 applied**，原因全部 `low-evidence`（无 control 的旧 payload fail closed）。
 - 两包 `tsc --noEmit` 通过；meta 包仅同步可选字段类型。
 
 ### Live `stage0:r6`（`npm run stage0:r6`，真实 dsh 0.2.1 headless）
@@ -73,3 +73,17 @@ npm install && npm run build
 npm run verify                 # 37/37
 npm run stage0:r6              # live Gate-v4 验收（~2 分钟）
 ```
+
+## 6. Interrogate 修复（Act 1–5）
+
+| Act | 问题 | 修复 | 证据 |
+| :-: | :-- | :-- | :-- |
+| 1 | `e2e/stage0` 未 pin v3，默认 v4 会覆盖历史 20/20 证据 | 在 `patchYaml()` 加 `gatePolicy: v3`，`--dump-config` 断言该字段；测试 20 静态校验两个 runner 的 pin | `npm run stage0` 重跑：PASS，NULL/ADV 20/20，v3 复现成立 |
+| 2 | 发布包 `files` 漏 `lib/admissibility.*` / `lib/gate-v4.*` | 加入 `files`；测试 20 校验 | `npm pack --dry-run` 现含 4 个新文件 |
+| 3 | admissibility 原型链查找：`__proto__`/`constructor` 可绕过，component 会抛错 | 改用 `Object.hasOwn` + Array 校验；补继承键测试 | 测试 16：继承键全部拒绝且不抛；`triggerThreshold` 仍通过 |
+| 4 | completion 恒真、regression 漏 completion、空 transcript 有效、applicability 默认 applied | `completion = assistantMessages > 0`；v4 空 transcript trial 置 `valid:false`；control 空 transcript 不产出 metric；`regressed` 加入 completion；`applicability` 缺失即 `unavailable` | 测试 17/17b；live 仍 PASS |
+| 5 | 无 v4 正向路径测试；live 全负向，gate 可“永远拒绝”通过 | 新增测试 19（stub v4 cycle：2 controls + persona 注入 + gate receipt + applied）；新增 live positive 臂 `stage0:r6:positive` | 测试 19 PASS；live negative PASS（0 applied / 20 rejected / 2 controls）；live positive PASS（**20/20 applied**、probe 80 = 4/cycle、gate stable/controlCount 2、每 cycle 恰 1 edit） |
+
+同时加固：`stage0:r6` 断言 session exit、每 session 恰 2 条记录、唯一 cycle、gate `controlCount=2 && stable=true`、probe 请求数；失败报告只写 `artifacts/`，不再覆盖 tracked `RESULTS.md`。
+
+**仍未修（review 的 Consider 项，非本次 Act）**：matched control prompt/长度匹配占位、receipt 与 payload 的 rejected 集一致性 + validator 深度、3–4 control 的 mean/stability 一致性、maxAppliedEdits 同 component 语义、judge/budget 键仍可被 `set-harness2-config` 调整、observeOnly 下仍跑 controls、失败诊断日志、persona 注入与沙箱、probe 两次实现/`index.ts` 体量、normalize/raw content。

@@ -20,7 +20,8 @@
     "e2e": "node e2e/run.mjs",
     "stage0": "node e2e/stage0/stage0.mjs",
     "r6:verify": "node e2e/round6-spike/gate-replay.mjs && node e2e/round6-spike/run-spike.mjs",
-    "stage0:r6": "node e2e/stage0-r6/run.mjs"
+    "stage0:r6": "node e2e/stage0-r6/run.mjs",
+    "stage0:r6:positive": "STAGE0R6_MODE=positive node e2e/stage0-r6/run.mjs"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "~4.0.5",

@@ -140,7 +140,8 @@ export function evaluateGateV4(input: {
     const trial = candidate.trial
     const applicable = trial.valid === true
       && trial.metrics !== undefined
-      && (trial.applicability ?? 'applied') === 'applied'
+      // Missing applicability is fail-closed: the gate must know the edit was in effect.
+      && trial.applicability === 'applied'
     const zero = { completion: 0, toolFailures: 0, stepCount: 0 } as const
     if (!admissibility.ok || !applicable || controlBar === undefined || trial.metrics === undefined) {
       return {
@@ -172,6 +173,7 @@ export function evaluateGateV4(input: {
       + GATE_V4_RANK_WEIGHTS.stepCount * deadbanded.stepCount
     const tokenGuard = metrics.tokenCost > GATE_V4_TOKEN_GUARD_RATIO * Math.max(controlBar.tokenCost, 1)
     const regressed = tokenGuard
+      || delta.completion < -noise.completion
       || delta.toolFailures < -noise.toolFailures
       || delta.stepCount < -noise.stepCount
     return {

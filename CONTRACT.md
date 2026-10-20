@@ -258,6 +258,7 @@ interface ProposeFailedPayload {
 - `ProbeCompletedPayload.controlMetrics?: ProbeMetrics[]`（最多 4；Gate-v4 要求 2）；
 - `ComposeAppliedPayload.gate?` / `ComposeRejectedPayload.gate?`（Gate-v4 receipt，含 candidates 明细、`appliedCandidateIds`、`rejectedCandidateIds`、`reason`）；
 - 新增校验器 `validateGateReceipt`；旧 v3 payload 仍然合法。
+- Gate-v4 **要求** `TrialRecord.applicability === 'applied'`（缺失按 `unavailable` fail closed）；空 transcript（无 assistant 输出）trial 无效；`completion` 由 assistant 输出推导，且 completion 回归属于 `regressed`。
 
 ### R6-2（gate 语义，已实现）
 

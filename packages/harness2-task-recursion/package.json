@@ -24,7 +24,11 @@
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
-    "README.md"
+    "README.md",
+    "lib/admissibility.js",
+    "lib/admissibility.d.ts",
+    "lib/gate-v4.js",
+    "lib/gate-v4.d.ts"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
