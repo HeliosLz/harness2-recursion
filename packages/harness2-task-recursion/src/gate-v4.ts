@@ -22,8 +22,10 @@ export interface GateMetrics {
 
 export interface GateCandidateInput {
   readonly candidateId: string
-  /** False = candidate never entered Probe; it must not appear in the receipt. */
+  /** True only when a probe arm actually ran for this candidate. */
   readonly probed?: boolean
+  /** Controls paired with THIS candidate (matched prompt/section lengths). */
+  readonly controls?: readonly GateMetrics[]
   readonly component: string
   readonly operation: string
   readonly content: string
@@ -36,6 +38,9 @@ export interface GateCandidateInput {
 
 export interface GateCandidateReceipt {
   readonly candidateId: string
+  readonly probed: boolean
+  readonly controlCount: number
+  readonly stable: boolean
   readonly admissible: boolean
   readonly admissibilityCode: string
   readonly applicable: boolean
@@ -128,22 +133,22 @@ function stableControls(controls: readonly GateMetrics[]): boolean {
  * with no control metrics yields `low-evidence` — never a silent legacy fallback.
  */
 export function evaluateGateV4(input: {
-  readonly controls: readonly GateMetrics[]
+  /** Flat audit count; per-candidate pairing comes from candidate.controls. */
+  readonly controls?: readonly GateMetrics[]
   readonly candidates: readonly GateCandidateInput[]
   readonly maxAppliedEdits?: number
 }): GateV4Decision {
-  const controls = input.controls.filter((metrics) => metrics !== undefined)
-  // PR-1.1: exactly two controls are required. A 3rd/4th replicate would change
-  // the mean without a matching stability check, so it is fail-closed instead.
-  const controlsValid = controls.length === 2
-  const stable = controlsValid && stableControls(controls)
-  const controlBar = controlsValid ? meanControl(controls) : undefined
-  const noise = controlsValid ? controlNoise(controls) : { completion: 0, toolFailures: 1, stepCount: 1 }
-
-  // Receipts cover only candidates that actually reached Probe. Unprobed
-  // candidates never get fabricated neutral deltas.
-  const probedCandidates = input.candidates.filter((candidate) => candidate.probed !== false)
-  const receipts: GateCandidateReceipt[] = probedCandidates.map((candidate) => {
+  const flatControls = (input.controls ?? []).filter((metrics) => metrics !== undefined)
+  const receipts: GateCandidateReceipt[] = input.candidates.map((candidate) => {
+    const candidateControls = (candidate.controls ?? flatControls)
+      .filter((metrics) => metrics !== undefined)
+    const controlsValid = candidateControls.length === 2
+    const candidateStable = controlsValid && stableControls(candidateControls)
+    const controlBar = controlsValid ? meanControl(candidateControls) : undefined
+    const noise = controlsValid
+      ? controlNoise(candidateControls)
+      : { completion: 0, toolFailures: 1, stepCount: 1 }
+    const probed = candidate.probed ?? true
     const admissibility = checkAdmissibility(candidate.component, candidate.operation, candidate.content)
     const trial = candidate.trial
     const applicable = trial.valid === true
@@ -154,6 +159,9 @@ export function evaluateGateV4(input: {
     if (!admissibility.ok || !applicable || controlBar === undefined || trial.metrics === undefined) {
       return {
         candidateId: candidate.candidateId,
+        probed,
+        controlCount: candidateControls.length,
+        stable: candidateStable,
         admissible: admissibility.ok,
         admissibilityCode: admissibility.code,
         applicable,
@@ -186,6 +194,9 @@ export function evaluateGateV4(input: {
       || delta.stepCount < -noise.stepCount
     return {
       candidateId: candidate.candidateId,
+      probed,
+      controlCount: candidateControls.length,
+      stable: candidateStable,
       admissible: true,
       admissibilityCode: admissibility.code,
       applicable: true,
@@ -194,14 +205,19 @@ export function evaluateGateV4(input: {
       rank,
       tokenGuard,
       regressed,
-      admitted: stable && !regressed,
+      admitted: probed && candidateStable && !regressed,
     }
   })
 
+  const probedReceipts = receipts.filter((receipt) => receipt.probed)
+  const stable = probedReceipts.length > 0 && probedReceipts.every((receipt) => receipt.stable)
+  const controlCount = flatControls.length > 0
+    ? flatControls.length
+    : Math.max(0, ...receipts.map((receipt) => receipt.controlCount))
   const baseReceipt = {
     version: 'gate/v4' as const,
     policy: 'v4' as const,
-    controlCount: controls.length,
+    controlCount,
     stable,
     rankWeights: GATE_V4_RANK_WEIGHTS,
     tokenGuardRatio: GATE_V4_TOKEN_GUARD_RATIO,
@@ -213,7 +229,7 @@ export function evaluateGateV4(input: {
     .slice()
     .sort((left, right) => right.rank - left.rank || left.candidateId.localeCompare(right.candidateId))
   const componentOf = (candidateId: string): string =>
-    probedCandidates.find((candidate) => candidate.candidateId === candidateId)?.component ?? ''
+    input.candidates.find((candidate) => candidate.candidateId === candidateId)?.component ?? ''
   const appliedCandidateIds: string[] = []
   for (const receipt of ranked) {
     if (appliedCandidateIds.length >= Math.max(1, Math.min(2, input.maxAppliedEdits ?? 1))) break
@@ -228,13 +244,11 @@ export function evaluateGateV4(input: {
     .filter((receipt) => !appliedCandidateIds.includes(receipt.candidateId))
     .map((receipt) => receipt.candidateId)
 
-  if (!controlsValid || !stable || controlBar === undefined) {
+  if (probedReceipts.length === 0 || !stable) {
     return {
       kind: 'reject',
       reason: 'low-evidence',
-      rejectedCandidateIds: rejectedCandidateIds.length > 0
-        ? rejectedCandidateIds
-        : receipts.map((receipt) => receipt.candidateId),
+      rejectedCandidateIds,
       gate: { ...baseReceipt, appliedCandidateIds: [], rejectedCandidateIds, reason: 'low-evidence' },
     }
   }
@@ -245,9 +259,7 @@ export function evaluateGateV4(input: {
     return {
       kind: 'reject',
       reason,
-      rejectedCandidateIds: rejectedCandidateIds.length > 0
-        ? rejectedCandidateIds
-        : receipts.map((receipt) => receipt.candidateId),
+      rejectedCandidateIds,
       gate: { ...baseReceipt, appliedCandidateIds: [], rejectedCandidateIds, reason },
     }
   }

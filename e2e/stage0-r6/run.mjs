@@ -206,9 +206,16 @@ async function main() {
   const rejectedCycles = new Set(rejected.map((record) => record.payload.cycleId))
 
   const controls = probes.map((probe) => Array.isArray(probe.payload.controlMetrics) ? probe.payload.controlMetrics.length : 0)
+  const expectedControls = MODE === 'positive' ? 4 : 0
   const badControls = probes.filter((probe) => {
     const metrics = probe.payload.controlMetrics
-    return !Array.isArray(metrics) || metrics.length !== 2
+    const assignments = probe.payload.controlAssignments
+    if (expectedControls === 0) {
+      return Array.isArray(metrics) && metrics.length > 0 || Array.isArray(assignments) && assignments.length > 0
+    }
+    return !Array.isArray(metrics) || metrics.length !== expectedControls
+      || !Array.isArray(assignments) || assignments.length !== 2
+      || assignments.some((item) => !Array.isArray(item?.metrics) || item.metrics.length !== 2)
       || metrics.some((item) => typeof item?.completion !== 'boolean')
   })
   const trialIdsValid = rejected.every((record) => {
@@ -217,8 +224,9 @@ async function main() {
   })
   const composeRecords = [...applied, ...rejected]
   const gateReceipts = composeRecords.filter((record) => record.payload.gate?.version === 'gate/v4')
+  const expectedGateControlCount = MODE === 'positive' ? 4 : 0
   const stableGate = gateReceipts.filter((record) => record.payload.gate.stable === true
-    && record.payload.gate.controlCount === 2)
+    && record.payload.gate.controlCount === expectedGateControlCount)
   const admissions = gateReceipts.flatMap((record) => record.payload.gate?.candidates ?? [])
   const inadmissible = admissions.filter((item) => !item.admissible).length
   const appliedEditCounts = applied.map((record) => record.payload.appliedEdits.length)
@@ -226,7 +234,9 @@ async function main() {
   const failedSessions = sessions.filter((session) => session.exit !== 0)
   const probeRequests = requestLog.filter((request) => request.kind === 'probe').length
   // Negative arm: all candidates are non-simulable, so controls are skipped (0 children).
-  const expectedProbeRequests = CYCLES * (MODE === 'positive' ? 4 : 0)
+  // positive: 2 candidates x (2 matched controls + 1 treatment) = 6 children/cycle;
+  // negative: all candidates non-simulable, so no child arms at all.
+  const expectedProbeRequests = CYCLES * (MODE === 'positive' ? 6 : 0)
 
   const summary = {
     mode: MODE,
@@ -271,7 +281,7 @@ async function main() {
         ['no control children for non-simulable candidates (controlCount=0)',
           gateReceipts.every((record) => record.payload.gate.controlCount === 0
             && record.payload.gate.stable === false)],
-        ['no control metrics emitted', badControls.length === CYCLES],
+        ['no control metrics/assignments emitted', badControls.length === 0],
       ]
     : [
         [`positive-control persona applied in >= 18 cycles (got ${applied.length})`, applied.length >= 18],
@@ -282,9 +292,9 @@ async function main() {
             PERSONAS.some((persona) => persona.contentHash === edit.contentHash)))],
         ['applied receipts show admitted candidates',
           applied.every((record) => record.payload.gate?.candidates.some((item) => item.admitted === true))],
-        ['every applied receipt has controlCount=2 and stable=true',
+        ['every applied receipt has controlCount=4 and stable=true',
           gateReceipts.length === CYCLES && stableGate.length === CYCLES],
-        ['every cycle has exactly 2 recovery-control metrics', badControls.length === 0],
+        ['every candidate has 2 matched controls and no bad metrics', badControls.length === 0],
       ]
   const checks = [...baseChecks, ...modeChecks]
   const passed = checks.every(([, ok]) => ok)
@@ -295,7 +305,7 @@ async function main() {
     `- Result: **${passed ? 'PASS' : 'FAIL'}**`,
     `- Cycles: ${summary.cycles} (sessions ${summary.sessions})`,
     `- probe/completed: ${summary.probeCompleted}; compose/applied: **${summary.composeApplied}**; compose/rejected: ${summary.composeRejected}`,
-    `- controlMetrics lengths: ${JSON.stringify(summary.controlMetricsLengths)}; bad controls: ${summary.badControls}`,
+    `- controlMetrics lengths: ${JSON.stringify(summary.controlMetricsLengths)}; bad controls: ${summary.badControls} (expected ${expectedControls})`,
     `- rejected ids ⊆ trials: ${summary.rejectedIdsSubsetOfTrials}; gate/v4 receipts: ${summary.gateReceipts}`,
     `- inadmissible candidate receipts: ${summary.inadmissibleCandidates}`,
     `- applied edit counts: ${JSON.stringify(summary.appliedEditCounts)}`,

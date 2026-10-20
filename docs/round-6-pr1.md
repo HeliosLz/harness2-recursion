@@ -35,7 +35,7 @@
 tests 40, pass 40, fail 0
 ```
 
-- 任务包测试 21 项；其中归档 replay：**v3 20/20 applied → v4 0/20 applied**，原因全部 `low-evidence`（无 control 的旧 payload fail closed）。
+- 任务包测试 28 项；其中归档 replay：**v3 20/20 applied → v4 0/20 applied**，原因全部 `low-evidence`（无 control 的旧 payload fail closed）。
 - 两包 `tsc --noEmit` 通过；meta 包仅同步可选字段类型。
 
 ### Live `stage0:r6`（`npm run stage0:r6`，真实 dsh 0.2.1 headless）
@@ -70,7 +70,7 @@ elapsed: 116.7s
 
 ```bash
 npm install && npm run build
-npm run verify                 # 37/37
+npm run verify                 # 47/47
 npm run stage0:r6              # live Gate-v4 验收（~2 分钟）
 ```
 

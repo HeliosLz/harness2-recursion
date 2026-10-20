@@ -162,8 +162,16 @@ export interface ProbeCompletedPayload {
   readonly trials: readonly TrialRecord[]
   readonly evidenceSummary: string
   readonly cycleId: string
-  /** Round-6: no-edit recovery-control metrics (Gate-v4 admission). */
+  /** Round-6: flat no-edit recovery-control metrics (audit/back-compat). */
   readonly controlMetrics?: readonly ProbeMetrics[]
+  /** Round-6: controls paired with the candidate they were matched to. */
+  readonly controlAssignments?: readonly ControlAssignment[]
+}
+
+/** One candidate's matched control replicates. */
+export interface ControlAssignment {
+  readonly candidateId: string
+  readonly metrics: readonly ProbeMetrics[]
 }
 
 /** Compose application path. */
@@ -429,6 +437,9 @@ const GATE_RECEIPT_REQUIRED = [
 const GATE_CANDIDATE_REQUIRED = [
   'candidateId', 'admissible', 'admissibilityCode', 'applicable',
   'delta', 'deadbanded', 'rank', 'tokenGuard', 'regressed', 'admitted',
+  'probed',
+  'controlCount',
+  'stable',
 ] as const
 const GATE_DELTA_KEYS = ['completion', 'toolFailures', 'stepCount'] as const
 
@@ -448,11 +459,19 @@ function validateGateCandidateReceipt(value: unknown, index: number): string[] {
   }
   const errors: string[] = []
   if (typeof value.candidateId !== 'string' || value.candidateId.length === 0) errors.push(`${label}.candidateId must be a non-empty string`)
-  for (const key of ['admissible', 'applicable', 'tokenGuard', 'regressed', 'admitted'] as const) {
+  for (const key of ['probed', 'stable', 'admissible', 'applicable', 'tokenGuard', 'regressed', 'admitted'] as const) {
     if (typeof value[key] !== 'boolean') errors.push(`${label}.${key} must be boolean`)
   }
-  if (typeof value.admissibilityCode !== 'string' || value.admissibilityCode.length === 0) {
-    errors.push(`${label}.admissibilityCode must be a non-empty string`)
+  if (!Number.isInteger(value.controlCount) || (value.controlCount as number) < 0 || (value.controlCount as number) > 4) {
+    errors.push(`${label}.controlCount must be an integer in 0..4`)
+  }
+  const admissibilityCodes = [
+    'ok', 'component-not-renderable', 'operation-not-allowlisted', 'empty-content',
+    'content-too-long', 'denied-phrase', 'unresolved-variable', 'not-a-persona-statement',
+    'invalid-tool-order', 'unknown-row', 'config-key-not-allowed', 'config-value-not-allowed',
+  ]
+  if (typeof value.admissibilityCode !== 'string' || !admissibilityCodes.includes(value.admissibilityCode)) {
+    errors.push(`${label}.admissibilityCode is not a frozen admissibility code`)
   }
   if (!isFiniteNumber(value.rank)) errors.push(`${label}.rank must be a finite number`)
   errors.push(...validateGateDelta(value.delta, `${label}.delta`))
@@ -468,8 +487,8 @@ export function validateGateReceipt(value: unknown): string[] {
   const errors: string[] = []
   if (value.version !== 'gate/v4') errors.push('gate.version must be gate/v4')
   if (value.policy !== 'v4') errors.push('gate.policy must be v4')
-  if (!Number.isInteger(value.controlCount) || (value.controlCount as number) < 0 || (value.controlCount as number) > 2) {
-    errors.push('gate.controlCount must be an integer in 0..2')
+  if (!Number.isInteger(value.controlCount) || (value.controlCount as number) < 0 || (value.controlCount as number) > 8) {
+    errors.push('gate.controlCount must be an integer in 0..8')
   }
   if (typeof value.stable !== 'boolean') errors.push('gate.stable must be boolean')
   if (!isRecord(value.rankWeights) || !hasExactKeys(value.rankWeights, [...GATE_DELTA_KEYS])) {
@@ -512,6 +531,25 @@ export function validateGateReceipt(value: unknown): string[] {
   for (const id of appliedIds) {
     if (rejectedIds.includes(id)) errors.push(`gate candidate ${id} cannot be both applied and rejected`)
   }
+  const covered = new Set([...appliedIds, ...rejectedIds])
+  if (candidateIds.length > 0
+    && (covered.size !== candidateIds.length || candidateIds.some((id) => !covered.has(id)))) {
+    errors.push('gate.appliedCandidateIds ∪ rejectedCandidateIds must cover every candidate receipt')
+  }
+  const candidateReceipts = (value.candidates as unknown[]).filter(isRecord)
+  for (const id of appliedIds) {
+    const receipt = candidateReceipts.find((item) => item.candidateId === id)
+    if (receipt !== undefined && receipt.admitted !== true) {
+      errors.push(`gate.appliedCandidateIds contains ${id} but its candidate receipt is not admitted`)
+    }
+  }
+  if (value.stable === true) {
+    for (const receipt of candidateReceipts) {
+      if (receipt.probed === true && receipt.stable !== true) {
+        errors.push(`gate.stable is true but candidate ${String(receipt.candidateId)} is not stable`)
+      }
+    }
+  }
   if (value.reason !== undefined) {
     if (value.reason !== 'low-evidence' && value.reason !== 'regression') {
       errors.push('gate.reason must be low-evidence | regression when present')
@@ -531,10 +569,10 @@ export function validateProbeCompletedPayload(value: unknown): string[] {
     || !hasExactKeys(
       value,
       ['taskId', 'baselineMetrics', 'trials', 'evidenceSummary', 'cycleId'],
-      ['controlMetrics'],
+      ['controlMetrics', 'controlAssignments'],
     )
   ) {
-    return ['probe/completed must have taskId/baselineMetrics/trials/evidenceSummary/cycleId (+ optional controlMetrics)']
+    return ['probe/completed must have taskId/baselineMetrics/trials/evidenceSummary/cycleId (+ optional controlMetrics/controlAssignments)']
   }
   const errors: string[] = []
   if (typeof value.taskId !== 'string' || value.taskId.length === 0) errors.push('taskId must be a non-empty string')
@@ -551,10 +589,36 @@ export function validateProbeCompletedPayload(value: unknown): string[] {
     errors.push(`evidenceSummary must be ≤ ${MAX_EVIDENCE_SUMMARY} characters`)
   }
   if (value.controlMetrics !== undefined) {
-    if (!Array.isArray(value.controlMetrics) || value.controlMetrics.length > 4) {
-      errors.push('controlMetrics must be an array of at most 4 metrics')
+    if (!Array.isArray(value.controlMetrics) || value.controlMetrics.length > 8) {
+      errors.push('controlMetrics must be an array of at most 8 metrics')
     } else {
       for (const metrics of value.controlMetrics) errors.push(...validateProbeMetrics(metrics))
+    }
+  }
+  if (value.controlAssignments !== undefined) {
+    if (!Array.isArray(value.controlAssignments) || value.controlAssignments.length > 2) {
+      errors.push('controlAssignments must be an array of at most 2 assignments')
+    } else {
+      const trialIds = new Set(
+        (Array.isArray(value.trials) ? value.trials : [])
+          .filter(isRecord)
+          .map((trial) => trial.candidateId)
+          .filter((id): id is string => typeof id === 'string'),
+      )
+      for (const assignment of value.controlAssignments) {
+        if (!isRecord(assignment) || !hasExactKeys(assignment, ['candidateId', 'metrics'])) {
+          errors.push('controlAssignments entries must have exactly candidateId/metrics')
+          continue
+        }
+        if (typeof assignment.candidateId !== 'string' || !trialIds.has(assignment.candidateId)) {
+          errors.push('controlAssignments.candidateId must exist in trials')
+        }
+        if (!Array.isArray(assignment.metrics) || assignment.metrics.length < 1 || assignment.metrics.length > 2) {
+          errors.push('controlAssignments.metrics must contain 1..2 metrics')
+        } else {
+          for (const metrics of assignment.metrics) errors.push(...validateProbeMetrics(metrics))
+        }
+      }
     }
   }
   return errors
@@ -1206,28 +1270,39 @@ function decideComposeV4(input: {
     return { kind: 'reject', reason: 'cost-limit', rejectedCandidateIds: trialIds }
   }
   const trialById = new Map(input.probe.trials.map((trial) => [trial.candidateId, trial]))
-  const gateInput = input.candidates.map((candidate) => ({
-    candidateId: candidate.candidateId,
-    component: candidate.edit.component,
-    operation: candidate.edit.operation,
-    content: candidate.edit.content,
-    probed: trialById.has(candidate.candidateId),
-    trial: trialById.get(candidate.candidateId) ?? { valid: false as const },
-  }))
+  const assignmentById = new Map(
+    (input.probe.controlAssignments ?? []).map((assignment) => [assignment.candidateId, assignment.metrics]),
+  )
+  const gateInput = input.candidates
+    .filter((candidate) => trialById.has(candidate.candidateId))
+    .map((candidate) => {
+    const trial = trialById.get(candidate.candidateId)
+    return {
+      candidateId: candidate.candidateId,
+      component: candidate.edit.component,
+      operation: candidate.edit.operation,
+      content: candidate.edit.content,
+      // A candidate is "probed" only when its treatment arm actually ran with the
+      // edit in effect; synthetic invalid trials are not probe evidence.
+      probed: trial?.applicability === 'applied',
+      ...(assignmentById.has(candidate.candidateId) ? { controls: assignmentById.get(candidate.candidateId)! } : {}),
+      trial: trial ?? { valid: false as const },
+    }
+  })
   const gate = evaluateGateV4({
     controls: (input.probe.controlMetrics ?? []) as readonly GateMetrics[],
     candidates: gateInput,
     maxAppliedEdits: input.config.maxAppliedEdits,
   })
   if (gate.kind === 'reject') {
-    // The receipt only contains probed candidates, so these ids are already
-    // trial ids; keep the intersection as a defensive invariant.
-    const rejected = gate.rejectedCandidateIds.filter((id) => trialIds.includes(id))
+    // R6-5: Gate-v4 rejection payloads are audit-complete over all trial ids
+    // (Q3's valid-trial/best-id rule stays for v3/legacy). Keep the receipt in
+    // lockstep with the payload rather than silently swapping one side.
     return {
       kind: 'reject',
       reason: gate.reason,
-      rejectedCandidateIds: rejected.length === gate.rejectedCandidateIds.length ? rejected : trialIds,
-      gate: gate.gate,
+      rejectedCandidateIds: trialIds,
+      gate: { ...gate.gate, rejectedCandidateIds: trialIds, reason: gate.reason },
     }
   }
   const byId = new Map(input.candidates.map((candidate) => [candidate.candidateId, candidate]))
@@ -1502,8 +1577,10 @@ export interface ProposalResult {
 
 export interface ProbeOutcome {
   readonly trials: readonly TrialRecord[]
-  /** Round-6 recovery-control metrics (empty in gatePolicy v3). */
+  /** Flat control metrics (empty in gatePolicy v3 / observe-only). */
   readonly controlMetrics: readonly ProbeMetrics[]
+  /** Per-candidate matched control pairs (Gate-v4 admission). */
+  readonly controlAssignments: readonly ControlAssignment[]
   readonly tokenCost: number
 }
 
@@ -1764,11 +1841,12 @@ async function runTrial(
     cycleId: input.cycleId,
     candidateId: input.candidate.candidateId,
   })
+  const injectionApplied = armResult.injection === 'applied' || armResult.injection === 'not-required'
   if (armResult.metrics !== undefined) {
     return {
       trial: {
         ...baseTrial,
-        ...(v4 ? { applicability: 'applied' as const } : {}),
+        ...(v4 ? { applicability: injectionApplied ? 'applied' as const : 'unavailable' as const } : {}),
         valid: true,
         metrics: armResult.metrics,
       },
@@ -1785,7 +1863,7 @@ async function runTrial(
   return {
     trial: {
       ...baseTrial,
-      ...(v4 ? { applicability: 'applied' as const } : {}),
+      ...(v4 ? { applicability: injectionApplied ? 'applied' as const : 'unavailable' as const } : {}),
       valid: false,
       error: error === 'timeout' ? `timeout after ${runtime.config.probeTimeoutMs}ms` : error,
     },
@@ -1854,7 +1932,7 @@ async function probeCandidates(
       trials.push(result.trial)
       tokenCost += result.tokenCost
     }
-    return { trials, controlMetrics: [], tokenCost }
+    return { trials, controlMetrics: [], controlAssignments: [], tokenCost }
   }
 
   const admissibilityOf = (candidate: HarnessCandidate) =>
@@ -1866,36 +1944,64 @@ async function probeCandidates(
   const budgetLeft = (tokenCost: number): boolean =>
     input.spentTokens + tokenCost < runtime.config.maxCostPerCycle
 
-  // Short-circuit: observe-only or nothing simulable never spawns children; the
-  // payload still carries schema-valid invalid trials (no fake metrics).
-  if (runtime.config.observeOnly || simulable.length === 0) {
+  // No simulable candidate: no child arms are meaningful. Every candidate still
+  // gets a schema-valid invalid trial, and the gate fails closed on missing
+  // control assignments.
+  if (simulable.length === 0) {
     return {
-      trials: input.candidates.map((candidate) =>
-        invalidTrial(candidate, runtime.config.observeOnly ? 'observe-only' : 'edit-not-in-effect')),
+      trials: input.candidates.map((candidate) => invalidTrial(candidate, 'edit-not-in-effect')),
       controlMetrics: [],
+      controlAssignments: [],
       tokenCost: 0,
     }
   }
 
-  const trials: TrialRecord[] = []
-  const controlMetrics: ProbeMetrics[] = []
-  let tokenCost = 0
-  const runControl = async (candidate: HarnessCandidate): Promise<void> => {
-    if (!budgetLeft(tokenCost)) return
-    const result = await runControlTrial(runtime, parent, {
-      taskId: input.taskId,
-      cycleId: input.cycleId,
-      baseline: input.baseline,
-      trajectorySummary: input.trajectorySummary,
-      candidate,
-    })
-    tokenCost += result.tokenCost
-    if (result.metrics !== undefined) controlMetrics.push(result.metrics)
+  // Observe-only still collects treatment evidence (it only suppresses COMPOSE
+  // application); controls are skipped because no admission decision is made.
+  if (runtime.config.observeOnly) {
+    const trials: TrialRecord[] = []
+    let tokenCost = 0
+    for (const candidate of input.candidates) {
+      if (!simulable.includes(candidate)) {
+        trials.push(invalidTrial(candidate, 'edit-not-in-effect'))
+        continue
+      }
+      if (!budgetLeft(tokenCost)) {
+        trials.push(invalidTrial(candidate, 'cost-limit'))
+        continue
+      }
+      const result = await runTrial(runtime, parent, { ...input, candidate })
+      trials.push(result.trial)
+      tokenCost += result.tokenCost
+    }
+    return { trials, controlMetrics: [], controlAssignments: [], tokenCost }
   }
 
+  const trials: TrialRecord[] = []
+  const controlAssignments: ControlAssignment[] = []
+  let tokenCost = 0
+
+  // Per-candidate matched controls: exactly two replicates for each simulable
+  // candidate, no cross-candidate averaging and no "retry another candidate".
+  const controlReplicates = runtime.config.controlReplicates
   for (const candidate of input.candidates) {
-    const isSim = simulable.includes(candidate)
-    if (isSim) await runControl(candidate)
+    if (simulable.includes(candidate)) {
+      const metrics: ProbeMetrics[] = []
+      for (let replicate = 0; replicate < controlReplicates; replicate += 1) {
+        if (!budgetLeft(tokenCost)) break
+        const result = await runControlTrial(runtime, parent, {
+          taskId: input.taskId,
+          cycleId: input.cycleId,
+          baseline: input.baseline,
+          trajectorySummary: input.trajectorySummary,
+          candidate,
+        })
+        tokenCost += result.tokenCost
+        if (result.metrics !== undefined) metrics.push(result.metrics)
+      }
+      // A partial pair is kept for audit; the gate fails closed for this candidate.
+      if (metrics.length > 0) controlAssignments.push({ candidateId: candidate.candidateId, metrics })
+    }
     if (trials.length > 0 && !budgetLeft(tokenCost)) {
       trials.push(invalidTrial(candidate, 'cost-limit'))
       continue
@@ -1904,11 +2010,13 @@ async function probeCandidates(
     trials.push(result.trial)
     tokenCost += result.tokenCost
   }
-  // Two control replicates are required by Gate-v4. With a single simulable
-  // candidate, run the second control matched to its body length.
-  if (controlMetrics.length === 1) await runControl(simulable[0]!)
 
-  return { trials, controlMetrics, tokenCost }
+  return {
+    trials,
+    controlMetrics: controlAssignments.flatMap((assignment) => assignment.metrics),
+    controlAssignments,
+    tokenCost,
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -2117,6 +2225,20 @@ async function runComposeDecision(
 
   if (decision.kind === 'reject') {
     const rejectedIds = decision.rejectedCandidateIds
+    if (decision.gate !== undefined) {
+      const receiptIds = new Set(decision.gate.rejectedCandidateIds)
+      const same = receiptIds.size === new Set(rejectedIds).size
+        && rejectedIds.every((id) => receiptIds.has(id))
+      if (!same) {
+        // Never swap ids silently: drop the record and report a structured error.
+        reportError(runtime, 'gate-receipt-mismatch', {
+          cycleId: input.probe.cycleId,
+          payload: rejectedIds,
+          receipt: decision.gate.rejectedCandidateIds,
+        })
+        return
+      }
+    }
     if (rejectedIds.length === 0) {
       reportError(runtime, 'rejected-candidates-empty', { reason: decision.reason })
       return
@@ -2244,6 +2366,7 @@ async function runCycle(runtime: TaskRuntime, target: ProbeTarget): Promise<void
       evidenceSummary: trajectorySummary,
       cycleId,
       ...(outcome.controlMetrics.length > 0 ? { controlMetrics: outcome.controlMetrics } : {}),
+      ...(outcome.controlAssignments.length > 0 ? { controlAssignments: outcome.controlAssignments } : {}),
     }
     // Q1: never emit a trial with incomplete candidate metadata.
     if (probePayload.trials.some((trial) => !trialMetadataComplete(trial))) {

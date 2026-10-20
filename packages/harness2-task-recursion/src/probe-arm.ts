@@ -50,11 +50,15 @@ export function neutralPlaceholder(length: number, seed: string): string {
     hash = Math.imul(hash, 16777619) >>> 0
   }
   const start = hash % NEUTRAL_WORDS.length
-  const words: string[] = []
-  for (let index = 0; index < 64; index += 1) {
-    words.push(NEUTRAL_WORDS[(start + index) % NEUTRAL_WORDS.length]!)
+  let text = ''
+  let index = 0
+  // Fill until the exact requested length; the old fixed 64-word budget capped
+  // long personas (~603 chars) and made matched arms shorter than the edit.
+  while (text.length < length) {
+    text += `${index === 0 ? '' : ' '}${NEUTRAL_WORDS[(start + index) % NEUTRAL_WORDS.length]!}`
+    index += 1
   }
-  return words.join(' ').slice(0, length)
+  return text.slice(0, length)
 }
 
 function padTo(value: string, length: number): string {
@@ -123,6 +127,8 @@ export interface ProbeArmIo {
 export interface ProbeArmResult {
   readonly metrics?: ProbeMetrics
   readonly tokenCost: number
+  /** Whether the edit was actually put into effect before the child ran. */
+  readonly injection: 'applied' | 'unavailable' | 'not-required'
   readonly error?: 'persona-injection-unavailable' | 'empty-transcript' | 'timeout' | 'probe-arm-failed'
 }
 
@@ -146,6 +152,8 @@ export async function runProbeArm(
 ): Promise<ProbeArmResult> {
   let child: AgentHandle | undefined
   let disposeSection: (() => void) | undefined
+  let injection: 'applied' | 'unavailable' | 'not-required' =
+    input.sectionText === undefined ? 'not-required' : 'unavailable'
   const startedAt = performance.now()
   try {
     child = await io.createChild(parent)
@@ -161,7 +169,7 @@ export async function runProbeArm(
           cycleId: input.cycleId,
           ...(input.candidateId === undefined ? {} : { candidateId: input.candidateId }),
         })
-        return { tokenCost: io.estimateTokens(input.prompt), error: 'persona-injection-unavailable' }
+        return { tokenCost: io.estimateTokens(input.prompt), injection, error: 'persona-injection-unavailable' }
       }
       const disposable = systemPrompt.section({
         name: 'deployment:persona-prefix',
@@ -169,6 +177,7 @@ export async function runProbeArm(
         text: input.sectionText,
       })
       if (typeof disposable === 'function') disposeSection = disposable as () => void
+      injection = 'applied'
     }
     io.sendPrompt(child, input.prompt)
     const idle = await io.waitForIdle(child.agent, input.timeoutMs)
@@ -178,7 +187,7 @@ export async function runProbeArm(
         cycleId: input.cycleId,
         ...(input.candidateId === undefined ? {} : { candidateId: input.candidateId }),
       })
-      return { tokenCost: io.estimateTokens(input.prompt), error: 'timeout' }
+      return { tokenCost: io.estimateTokens(input.prompt), injection, error: 'timeout' }
     }
     const metrics = io.metrics(
       context,
@@ -192,11 +201,12 @@ export async function runProbeArm(
         cycleId: input.cycleId,
         ...(input.candidateId === undefined ? {} : { candidateId: input.candidateId }),
       })
-      return { tokenCost: metrics.tokenCost, error: 'empty-transcript' }
+      return { tokenCost: metrics.tokenCost, injection, error: 'empty-transcript' }
     }
     return {
       metrics,
       tokenCost: metrics.tokenCost + io.estimateTokens(io.lastAssistantText(child.agent)),
+      injection,
     }
   } catch (error) {
     io.onError('probe-arm-failed', {
@@ -204,7 +214,12 @@ export async function runProbeArm(
       ...(input.candidateId === undefined ? {} : { candidateId: input.candidateId }),
       error: error instanceof Error ? error.message : String(error),
     })
-    return { tokenCost: io.estimateTokens(input.prompt), error: 'probe-arm-failed' }
+    // createChild/sendPrompt failures before an injection are not "applied".
+    return {
+      tokenCost: io.estimateTokens(input.prompt),
+      injection,
+      error: 'probe-arm-failed',
+    }
   } finally {
     if (disposeSection !== undefined) {
       try { disposeSection() } catch { /* effect disposal must not mask the arm */ }

@@ -49,7 +49,7 @@ node e2e/round6-spike/run-spike.mjs     # 隔离 profile：persona patch → wir
 
 核心决定：拆分 **admission（会话内确定性准入）** 与 **certification（离线 held-out 认证）**；ledger 仍 v3、bus 仍 4 事件、meta 只从认证结果学习。
 
-**PR-1 已实现并验收（含 adversarial review 修复）**（`docs/round-6-pr1.md`）：Gate-v4 admission + admissibility + 2 个真实 recovery controls + persona in-probe 注入；`npm run stage0:r6` 负向 20 cycles **0 applied / 20 rejected**（候选不可模拟，按设计跳过 controls），`npm run stage0:r6:positive` 正向 **20/20 applied**、gate stable/controlCount=2、每 cycle 恰 1 edit；两者 gate receipt 与 payload 一致。剩余：PR-2 edit-body sidecar、PR-3 offline applier、PR-4 Gate-B harness、PR-5 meta verified-experience。
+**PR-1 / PR-1.1 / PR-1.2 已实现并验收**（`docs/round-6-pr1.md`、`docs/round-6-pr1.2.md`）：Gate-v4 admission + admissibility + **每个候选 2 个 matched controls** + persona in-probe 注入；`stage0:r6` 负向 0 applied / 0 control child，`stage0:r6:positive` 正向 **20/20 applied**、**4 controls + 2 trials/cycle**、gate `controlCount=4 && stable=true`、每 cycle 1 edit。剩余：PR-2 edit-body sidecar、PR-3 offline applier、PR-4 Gate-B harness、PR-5 meta verified-experience。
 
 ## 社区讨论
 
@@ -70,7 +70,7 @@ npm run stage0:r6    # Gate-v4 live 负向验收（20 cycles，约 2 分钟）
 npm run stage0:r6:positive  # Gate-v4 live 正向验收（persona 必须被 applied）
 ```
 
-本次结果（2026-10-20）：`npm run verify` **44/44 pass**；typecheck/build exit 0；`npm pack --dry-run` 清单齐全；真实会话 E2E 通过（见下）。
+本次结果（2026-10-20）：`npm run verify` **47/47 pass**；typecheck/build exit 0；`npm pack --dry-run` 清单齐全；真实会话 E2E 通过（见下）。
 
 ## 第三轮新增（相对第二轮）
 

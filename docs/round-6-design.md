@@ -26,11 +26,11 @@
 
 | 臂 | 内容 | 用途 |
 | :-- | :-- | :-- |
-| **C₁/C₂（恢复对照 RCA）** | 2 个无编辑 probe 子智能体，同 factory/model/timeout/提示骨架；编辑体替换为长度匹配的中性占位（按 `hash(cycleId)` 固定选取） | 量化“不做编辑时恢复/漂移是什么样”；`C̄` 为比较基线，`|C₁−C₂|` 为噪声 |
+| **C₁/C₂（恢复对照 RCA）** | **每个可模拟候选** 2 个无编辑 probe 子智能体，同 factory/model/timeout/提示骨架；编辑体替换为**精确长度**的中性占位（按 `hash(cycleId)` 固定选取） | 量化“不做编辑时恢复/漂移是什么样”；`C̄` 为该候选的比较基线，`|C₁−C₂|` 为噪声；**不做跨候选平均**，任一 control 失败该候选 fail closed |
 | **T₁/T₂（treatment）** | 现有 `runTrial`；对 **可模拟编辑**（persona）在子智能体首次请求前用 agent-scoped 机制注入（见 §1.4） | 测量候选 |
 | **baselineMetrics** | 失败快照，保留为 payload 事实 | **不参与打分**（不同总体，这是 P0 根因） |
 
-`controlReplicates=2`（默认）。任一 control 缺失/超时/取消 → `low-evidence`（fail closed）。优先级：`observeOnly` → `cost-limit` → `low-evidence` → `regression` → apply。
+`controlReplicates=2`（默认，每个可模拟候选 2 个 matched controls）。任一 control 缺失/超时/取消 → 该候选 `low-evidence`（fail closed，不跨候选重试）。优先级：`observeOnly` → `cost-limit` → `low-evidence` → `regression` → apply。
 
 ### 1.3 Admissibility predicate `A(e)`（确定性，无 LLM、无 I/O）
 
@@ -105,7 +105,7 @@ admit   = A(e) ∧ stable ∧ ¬regress ∧ (trial.applicability === 'applied')
   - `stage0:r6`：真实 20 cycles，NULL 0/20、ADVERSARIAL 0/20；外加 **Stage-0 v2 四臂**：①旧 fixture 原样过新 gate → applied 0/20；②重贴标签攻击 → 0/20；③positive control persona → 准入 ≥18/20；④无 control 的 payload → fail closed（`low-evidence`）。**注意**：旧 fixture 的 NULL/ADV 是合法 JSON 提案，不会在 `parseProposal` 被拒；必须在 admissibility 层拒绝——不要把“raw 拒绝”误当 gate 测试。
   - `verify` 增加 `edit-body` 哈希/原子写测试与 `meta` 验证过滤测试。
 
-**RCA 证据声明**：归档 ledger 没有 `controlMetrics`，因此 RCA 的 0/20 **只能在新的 live Stage-0 v2 中测量**；不得用 `control=trial` 的构造当证据（arena 指出该回放是 tautology）。`stage0:r6` 必须真实跑 2 个 control 子智能体。
+**RCA 证据声明**：归档 ledger 没有 `controlMetrics`，因此 RCA 的 0/20 **只能在新的 live Stage-0 v2 中测量**；不得用 `control=trial` 的构造当证据（arena 指出该回放是 tautology）。`stage0:r6` 的 positive 臂必须为每个 simulable 候选真实跑 2 个 matched controls；negative 臂候选不可模拟，按设计 0 个 child。
 
 ## 2. 持久化编辑正文（sidecar，不升 ledger 版本）
 
@@ -215,7 +215,7 @@ $DSH_HOME/profiles/<profile>/cordis.patch.yml
 
 | 修订 | 内容 | 冻结面变化 |
 | :-- | :-- | :-- |
-| **R6-1** | `probe/completed` 可选 `controlMetrics?: ProbeMetrics[]`、`gate?: GateReceipt`；`compose/*` 可选 `gate?`；`TrialRecord` 可选 `applicability?: 'applied'\|'unavailable'` | 全部可选；旧记录仍合法；缺失 control 的新记录 fail closed |
+| **R6-1** | `probe/completed` 可选 `controlMetrics?: ProbeMetrics[]`、`controlAssignments?: {candidateId, metrics[]}[]`；`compose/*` 可选 `gate?`；`TrialRecord` 可选 `applicability?: 'applied'\|'unavailable'`；Gate receipt candidate 增加 `probed/controlCount/stable` | 全部可选；旧记录仍合法；缺失/不配对 control 的新记录 fail closed |
 | **R6-2** | Gate-A 规则：baseline 不参与打分；RCA 2 副本；deadband；tokenCost 只做 guard；`maxAppliedEdits` 默认 1；reason union 不变 | 语义修订，事件/字段不变 |
 | **R6-3** | meta 不再从 `compose/*` 学；只从 `evaluations.jsonl` 认证记录学；无记录旧条目默认隔离 | 语义修订；`ExperienceEntry`/confidence 不变 |
 | **R6-4** | sidecar：`harness2-edit/v1`、`harness2-apply/v1`、`harness2-eval/v1`、`harness2-candidates/v1`；task/meta 配置新增 `applyStatePath`、`editsDir`、`evaluationsPath`、`enableLegacyExperience`、`maxAppliedEdits` | 新增可选文件/配置；ledger v3、bus 4 事件、`AppliedEdit`、组件常量不变 |
@@ -260,4 +260,4 @@ $DSH_HOME/profiles/<profile>/cordis.patch.yml
 - **§1.3 allowlist 收窄**：候选只能行为调参（`triggerThreshold/repeatedFailureWindow/cooldownMs/trajectoryWindow`）；`maxAppliedEdits/controlReplicates/probeTimeoutMs/maxCostPerCycle/metricWeights/gatePolicy/路径/模型` 均不可调。`controlReplicates` 固定 2，`maxAppliedEdits` 1|2 且第二编辑须不同 component。
 - **§1.5 receipt**：只包含实际 probed 候选；`gate.rejectedCandidateIds` 与 payload 完全一致；validator 做 exact-key + 嵌套/集合/原因一致性校验。
 - **§1.3 TODO**：row 存在性 / tool 注册名需要 composed snapshot，PR-1.1 仅做 shape-valid；`PROPOSE_SYSTEM` 已标注 `TODO(PR-3, composed snapshot)`。
-- **§1.6 测试**：新增 matched-arm/prompt 长度、observeOnly 零 child、缺失 systemPrompt/空 transcript 诊断、receipt-payload 一致性、raw row 校验；`npm run verify` 44/44。
+- **§1.6 测试**：新增 matched-arm/prompt 长度、per-candidate controls、control 失败不重试、observeOnly 只取证、pre-injection 诊断、receipt-payload 一致性；`npm run verify` 47/47。

@@ -99,6 +99,11 @@ export interface ProbeCompletedPayload {
   readonly cycleId: string
   /** Round-6 optional recovery-control metrics (meta does not consume them yet). */
   readonly controlMetrics?: readonly ProbeMetrics[]
+  /** Round-6 per-candidate matched controls (meta does not consume them yet). */
+  readonly controlAssignments?: readonly {
+    readonly candidateId: string
+    readonly metrics: readonly ProbeMetrics[]
+  }[]
 }
 
 export type ApplyMode = 'pre-step-patch' | 'next-task-ledger' | 'noop-todo'

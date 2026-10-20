@@ -258,6 +258,7 @@ interface ProposeFailedPayload {
 - `ProbeCompletedPayload.controlMetrics?: ProbeMetrics[]`（最多 4；Gate-v4 要求 2）；
 - `ComposeAppliedPayload.gate?` / `ComposeRejectedPayload.gate?`（Gate-v4 receipt，含 candidates 明细、`appliedCandidateIds`、`rejectedCandidateIds`、`reason`）；
 - 新增校验器 `validateGateReceipt`；旧 v3 payload 仍然合法。
+- PR-1.2：`probe/completed` 新增可选 `controlAssignments?: { candidateId, metrics: ProbeMetrics[] }[]`（per-candidate matched controls，每项 1..2 metrics）；Gate candidate receipt 增加 `probed/controlCount/stable`，全局 `controlCount` 允许 0..8。
 - Gate-v4 **要求** `TrialRecord.applicability === 'applied'`（缺失按 `unavailable` fail closed）；空 transcript（无 assistant 输出）trial 无效；`completion` 由 assistant 输出推导，且 completion 回归属于 `regressed`。
 
 ### R6-2（gate 语义，已实现）
@@ -274,3 +275,7 @@ interface ProposeFailedPayload {
 
 - R6-3（meta 只从 evaluations 学习、旧经验 quarantine）留待 PR-5；
 - R6-4（edit body / apply / eval sidecars、offline applier）留待 PR-2/PR-3/PR-4。
+
+### R6-5（Gate-v4 rejection 审计语义，PR-1.2）
+
+Gate-v4 的 `compose/rejected.rejectedCandidateIds` 为 **audit-complete**：列出该 cycle 全部 trials 的 candidateId，并与 `gate.rejectedCandidateIds` 完全一致；这与冻结的 Q3（`low-evidence` 取 valid trial ids、`regression` 取 best id）不同——**Q3 规则继续适用于 `gatePolicy: v3`/legacy**，v4 采用本修订。控制候选（non-simulable）仍以 `valid:false, applicability:'unavailable'` 的 trial 形式出现，保证 id 可审计。

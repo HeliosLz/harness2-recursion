@@ -4,12 +4,12 @@
 - Result: **PASS**
 - Cycles: 20 (sessions 20)
 - probe/completed: 20; compose/applied: **0**; compose/rejected: 20
-- controlMetrics lengths: [0]; bad controls: 20
+- controlMetrics lengths: [0]; bad controls: 0 (expected 0)
 - rejected ids ⊆ trials: true; gate/v4 receipts: 20
 - inadmissible candidate receipts: 40
 - applied edit counts: []
 - fake requests: {"main":80,"propose":20}
-- elapsed: 116.4s
+- elapsed: 116.3s
 
 ## Checks
 - PASS — every session exits 0
@@ -22,4 +22,4 @@
 - PASS — all candidate receipts are inadmissible
 - PASS — every rejection id exists in the same payload trials
 - PASS — no control children for non-simulable candidates (controlCount=0)
-- PASS — no control metrics emitted
+- PASS — no control metrics/assignments emitted

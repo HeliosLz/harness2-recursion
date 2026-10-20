@@ -1103,7 +1103,9 @@ test('17. gate v4 — fail-closed controls, admissibility, deadband, token guard
   })
   assert.equal(unprobed.kind, 'apply')
   assert.deepEqual(unprobed.appliedCandidateIds, ['probed'])
-  assert.deepEqual(unprobed.gate.candidates.map((receipt) => receipt.candidateId), ['probed'])
+  assert.deepEqual(unprobed.gate.candidates.map((receipt) => receipt.candidateId), ['probed', 'unprobed'])
+  assert.deepEqual(unprobed.gate.candidates.map((receipt) => receipt.probed), [true, false])
+  assert.equal(unprobed.gate.candidates[1].admitted, false)
 
   const malformed = plugin.validateGateReceipt({
     version: 'gate/v4', policy: 'v4', controlCount: 0.5, stable: 'yes',
@@ -1237,21 +1239,25 @@ test('19. v4 cycle — controls, persona injection, gate receipt, applied branch
       .trim().split('\n').filter(Boolean).map((line) => JSON.parse(line))
     assert.deepEqual(envelopes.map((envelope) => envelope.event), ['probe/completed', 'compose/applied'])
     const probe = envelopes[0].payload
-    assert.equal(probe.controlMetrics.length, 2)
+    assert.equal(probe.controlMetrics.length, 4, 'two matched controls per simulable candidate')
+    assert.equal(probe.controlAssignments.length, 2)
+    assert.ok(probe.controlAssignments.every((assignment) => assignment.metrics.length === 2))
     assert.deepEqual(probe.trials.map((trial) => trial.applicability), ['applied', 'applied'])
     assert.ok(probe.trials.every((trial) => trial.valid === true))
     const applied = envelopes[1].payload
     assert.equal(applied.gate.version, 'gate/v4')
-    assert.equal(applied.gate.controlCount, 2)
+    assert.equal(applied.gate.controlCount, 4)
     assert.equal(applied.gate.stable, true)
     assert.equal(applied.appliedEdits.length, 1)
     assert.equal(applied.appliedComponents.length, 1)
     assert.equal(applied.appliedComponents[0], 'system-prompt')
     const injected = handles.flatMap((handle) => handle.sections)
-    assert.equal(injected.length, 4, 'two controls + two treatments each register a matched section')
-    // probeCandidates runs control→treatment per candidate: section lengths must pair up.
-    assert.equal(injected[0].text.length, injected[1].text.length)
-    assert.equal(injected[2].text.length, injected[3].text.length)
+    assert.equal(injected.length, 6, 'two candidates x (2 matched controls + 1 treatment)')
+    // Per candidate: control1, control2, treatment — matched lengths within the triple.
+    for (let index = 0; index < injected.length; index += 3) {
+      assert.equal(injected[index].text.length, injected[index + 1].text.length)
+      assert.equal(injected[index + 1].text.length, injected[index + 2].text.length)
+    }
     assert.ok(injected.every((section) => section.name === 'deployment:persona-prefix'))
     const treatmentTexts = injected.filter((section) => section.text === PERSONA_CONTENT || section.text === PERSONA_CONTENT_2)
     assert.equal(treatmentTexts.length, 2)
@@ -1307,13 +1313,23 @@ test('21. matched arms — control/treatment prompt+section lengths equal; contr
   assert.ok(!control.sectionText.includes('You are a coding agent'))
   // Different candidate bodies still produce matched arm pairs (placeholder length follows the body).
   const short = probeArm.buildArmPrompt({ ...input, candidate: { ...input.candidate, content: 'You are a terse agent.' } }, 'treatment')
+  for (const length of [603, 604, 2000]) {
+    assert.equal(probeArm.neutralPlaceholder(length, 'seed').length, length)
+  }
+  const longContent = `You are a coding agent. ${'verify the failing command before retrying. '.repeat(60)}`.slice(0, 2000)
+  const longInput = { ...input, candidate: { ...input.candidate, content: longContent } }
+  const longTreatment = probeArm.buildArmPrompt(longInput, 'treatment')
+  const longControl = probeArm.buildArmPrompt(longInput, 'control')
+  assert.equal(longTreatment.prompt.length, longControl.prompt.length)
+  assert.equal(longTreatment.sectionText.length, longControl.sectionText.length)
+  assert.equal(longControl.prompt.includes(longContent), false)
   const shortControl = probeArm.buildArmPrompt({ ...input, candidate: { ...input.candidate, content: 'You are a terse agent.' } }, 'control')
   assert.equal(short.prompt.length, shortControl.prompt.length)
   assert.equal(short.sectionText.length, shortControl.sectionText.length)
 })
 
 /* 22 */
-test('22. observeOnly v4 — no control children, schema-valid trials, observe-only rejection', { timeout: 30000 }, async () => {
+test('22. observeOnly v4 — treatment evidence, no controls, observe-only rejection', { timeout: 30000 }, async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'h2-task-observe-'))
   try {
     let created = 0
@@ -1344,12 +1360,15 @@ test('22. observeOnly v4 — no control children, schema-valid trials, observe-o
         return text.trim().split('\n').filter(Boolean).length >= 2
       } catch { return false }
     })
-    assert.equal(created, 0, 'observeOnly must not create control/treatment children')
+    // Observe-only means "collect evidence, do not apply"; treatment arms run,
+    // control arms are skipped because no admission decision is made.
+    assert.equal(created, 2, 'observeOnly must run treatment arms but no controls')
     const envelopes = (await readFile(path.join(dir, 'ledger.jsonl'), 'utf8'))
       .trim().split('\n').filter(Boolean).map((line) => JSON.parse(line))
     assert.equal(envelopes[0].event, 'probe/completed')
     assert.equal(envelopes[0].payload.controlMetrics, undefined)
-    assert.ok(envelopes[0].payload.trials.every((trial) => trial.valid === false && trial.error === 'observe-only'))
+    assert.equal(envelopes[0].payload.controlAssignments, undefined)
+    assert.ok(envelopes[0].payload.trials.every((trial) => trial.valid === true && trial.applicability === 'applied'))
     assert.equal(envelopes[1].payload.reason, 'observe-only')
   } finally {
     await rm(dir, { recursive: true, force: true })
@@ -1458,7 +1477,10 @@ test('24. gate receipt ↔ payload consistency + deep validation', () => {
   })
   assert.equal(decision.kind, 'reject')
   assert.equal(decision.reason, 'regression')
-  assert.deepEqual(decision.gate.candidates.map((item) => item.candidateId), ['a'], 'receipt only covers probed candidates')
+  assert.deepEqual(decision.gate.candidates.map((item) => item.candidateId), ['a'], 'receipt covers candidates with trials only')
+  assert.equal(decision.gate.candidates[0].probed, true)
+  assert.deepEqual(decision.gate.rejectedCandidateIds, decision.rejectedCandidateIds)
+  assert.deepEqual(decision.rejectedCandidateIds, ['a'])
   assert.deepEqual(decision.gate.rejectedCandidateIds, decision.rejectedCandidateIds)
   assert.equal(plugin.validateGateReceipt(decision.gate).length, 0)
   const payload = {
@@ -1476,4 +1498,196 @@ test('24. gate receipt ↔ payload consistency + deep validation', () => {
     ...payload,
     gate: { ...decision.gate, rejectedCandidateIds: ['b'] },
   }).some((error) => error.includes('gate.rejectedCandidateIds')))
+})
+
+
+/* 25 */
+test('25. matched per-candidate controls — a failed control is not retried and fails closed', { timeout: 30000 }, async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'h2-task-control-fail-'))
+  try {
+    let created = 0
+    const stub = createStubContext({
+      services: {
+        agentDefaultModel: { currentSelection: () => ({ provider: 'fake', model: 'fake-model' }) },
+        llm: { stream: () => usageStream(personaProposalJson(), 500) },
+        agents: {
+          current: () => ({ applyHarnessPatch: () => {} }),
+          create: async () => {
+            created += 1
+            // First child = candidate 1's first control. Do NOT retry it.
+            if (created === 1) throw new Error('control child failed')
+            return childHandle([{ role: 'assistant', content: [{ type: 'text', text: 'ok' }] }])
+          },
+        },
+        harness2Experience: { ready: true, queryPriors: () => ({ priors: [], totalMatched: 0 }) },
+      },
+    })
+    plugin.apply(stub.ctx, makeConfig(dir, { observeOnly: false }))
+    const agent = makeAgent('parent-control-fail')
+    const listener = stub.listeners.get('agent/request-error')
+    const signal = new AbortController().signal
+    for (let index = 0; index < 3; index += 1) {
+      await listener(
+        { agent, turn: 1, step: index + 1, provider: 'fake', failure: { message: 'failed', code: 'E' }, retryPolicy: undefined, signal },
+        async () => undefined,
+      )
+    }
+    await waitFor(async () => {
+      try {
+        const text = await readFile(path.join(dir, 'ledger.jsonl'), 'utf8')
+        return text.trim().split('\n').filter(Boolean).length >= 2
+      } catch { return false }
+    })
+    const envelopes = (await readFile(path.join(dir, 'ledger.jsonl'), 'utf8'))
+      .trim().split('\n').filter(Boolean).map((line) => JSON.parse(line))
+    assert.equal(created, 6, 'two candidates x (2 controls + 1 treatment); no retry child')
+    const probe = envelopes[0].payload
+    const assignments = probe.controlAssignments
+    assert.equal(assignments.length, 2)
+    assert.equal(assignments[0].metrics.length, 1, 'failed control leaves a partial pair')
+    assert.equal(assignments[1].metrics.length, 2)
+    const applied = envelopes.find((envelope) => envelope.event === 'compose/applied')
+    assert.equal(applied, undefined)
+    const rejected = envelopes.find((envelope) => envelope.event === 'compose/rejected')
+    assert.equal(rejected.payload.reason, 'low-evidence')
+    assert.equal(rejected.payload.gate.stable, false)
+    assert.equal(rejected.payload.gate.candidates[0].controlCount, 1)
+    assert.equal(rejected.payload.gate.candidates[0].admitted, false)
+
+    // Pairing: a candidate with a 1000-token control must not be judged against
+    // another candidate's 3000-token control.
+    const metric = (overrides = {}) => goodTrialMetrics({ completion: true, toolFailures: 1, stepCount: 2, tokenCost: 1000, ...overrides })
+    const paired = plugin.evaluateGateV4({
+      candidates: [
+        {
+          candidateId: 'a', component: 'system-prompt', operation: 'set-persona-prefix',
+          content: 'You are a coding agent that checks the failing command before retrying.',
+          controls: [metric({ tokenCost: 1000 }), metric({ tokenCost: 1000 })],
+          trial: { valid: true, applicability: 'applied', metrics: metric({ tokenCost: 1300 }) },
+        },
+        {
+          candidateId: 'b', component: 'system-prompt', operation: 'set-persona-prefix',
+          content: 'You are a coding agent that verifies the failing step before retrying.',
+          controls: [metric({ tokenCost: 3000 }), metric({ tokenCost: 3000 })],
+          trial: { valid: true, applicability: 'applied', metrics: metric({ tokenCost: 1000 }) },
+        },
+      ],
+    })
+    assert.equal(paired.gate.candidates[0].tokenGuard, true)
+    assert.equal(paired.gate.candidates[1].tokenGuard, false)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+/* 26 */
+test('26. receipt audit — 3 controls fail closed but the record stays emittable; coverage is enforced', () => {
+  const controls = [
+    goodTrialMetrics({ completion: true, toolFailures: 1, stepCount: 2, tokenCost: 1000 }),
+    goodTrialMetrics({ completion: true, toolFailures: 1, stepCount: 2, tokenCost: 1000 }),
+    goodTrialMetrics({ completion: true, toolFailures: 1, stepCount: 2, tokenCost: 1000 }),
+  ]
+  const candidates = [
+    {
+      candidateId: 'a', candidateType: 'invariant',
+      edit: { component: 'system-prompt', operation: 'set-persona-prefix', content: 'You are a coding agent that checks the failing command.', contentHash: hashOf('You are a coding agent that checks the failing command.') },
+    },
+    {
+      candidateId: 'b', candidateType: 'domain',
+      edit: { component: 'system-prompt', operation: 'set-persona-prefix', content: 'You are a coding agent that verifies the failing step.', contentHash: hashOf('You are a coding agent that verifies the failing step.') },
+    },
+  ]
+  const probe = {
+    taskId: 'task-1', cycleId: 'cycle-controls-3', baselineMetrics: metrics(),
+    trials: [
+      trialRecord({ candidateId: 'a', component: 'system-prompt', operation: 'set-persona-prefix', applicability: 'applied', metrics: goodTrialMetrics() }),
+      trialRecord({ candidateId: 'b', component: 'system-prompt', operation: 'set-persona-prefix', applicability: 'applied', metrics: goodTrialMetrics() }),
+    ],
+    evidenceSummary: 'failure', controlMetrics: controls,
+  }
+  const decision = plugin.decideCompose({
+    probe, candidates, cycleTokenCost: 10,
+    config: new plugin.Config({ observeOnly: false, gatePolicy: 'v4' }),
+  })
+  assert.equal(decision.kind, 'reject')
+  assert.equal(decision.reason, 'low-evidence')
+  assert.equal(decision.gate.controlCount, 3)
+  assert.deepEqual(decision.rejectedCandidateIds, ['a', 'b'])
+  assert.deepEqual(plugin.validateGateReceipt(decision.gate), [])
+  const payload = {
+    taskId: probe.taskId, cycleId: probe.cycleId, reason: decision.reason,
+    rejectedCandidateIds: decision.rejectedCandidateIds, baselineMetrics: probe.baselineMetrics,
+    trials: probe.trials, gate: decision.gate,
+  }
+  assert.deepEqual(plugin.validateComposeRejectedPayload(payload), [])
+  // Coverage: applied ∪ rejected must cover every candidate receipt.
+  const ghost = {
+    ...decision.gate,
+    candidates: [...decision.gate.candidates, { ...decision.gate.candidates[0], candidateId: 'ghost' }],
+  }
+  assert.ok(plugin.validateGateReceipt(ghost).some((error) => error.includes('must cover')))
+  assert.ok(plugin.validateGateReceipt({ ...decision.gate, candidates: [{ ...decision.gate.candidates[0], admissibilityCode: 'not-a-code' }] })
+    .some((error) => error.includes('admissibilityCode')))
+})
+
+/* 27 */
+test('27. pre-injection arm failure — trial is not marked applied and the gate fails closed', { timeout: 30000 }, async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'h2-task-preinject-'))
+  try {
+    let created = 0
+    const stub = createStubContext({
+      services: {
+        agentDefaultModel: { currentSelection: () => ({ provider: 'fake', model: 'fake-model' }) },
+        llm: { stream: () => usageStream(personaProposalJson(), 500) },
+        agents: {
+          current: () => ({ applyHarnessPatch: () => {} }),
+          create: async () => {
+            created += 1
+            // Calls: candidate1 control1, control2, treatment => fail the treatment.
+            if (created === 3) throw new Error('treatment child failed before injection')
+            return childHandle([{ role: 'assistant', content: [{ type: 'text', text: 'ok' }] }])
+          },
+        },
+        harness2Experience: { ready: true, queryPriors: () => ({ priors: [], totalMatched: 0 }) },
+      },
+    })
+    plugin.apply(stub.ctx, makeConfig(dir, { observeOnly: false }))
+    const agent = makeAgent('parent-preinject')
+    const listener = stub.listeners.get('agent/request-error')
+    const signal = new AbortController().signal
+    for (let index = 0; index < 3; index += 1) {
+      await listener(
+        { agent, turn: 1, step: index + 1, provider: 'fake', failure: { message: 'failed', code: 'E' }, retryPolicy: undefined, signal },
+        async () => undefined,
+      )
+    }
+    await waitFor(async () => {
+      try {
+        const text = await readFile(path.join(dir, 'ledger.jsonl'), 'utf8')
+        return text.trim().split('\n').filter(Boolean).length >= 2
+      } catch { return false }
+    })
+    const envelopes = (await readFile(path.join(dir, 'ledger.jsonl'), 'utf8'))
+      .trim().split('\n').filter(Boolean).map((line) => JSON.parse(line))
+    const probe = envelopes[0].payload
+    const failedTrial = probe.trials.find((trial) => trial.candidateId === 'cand-' + 'x')
+    void failedTrial
+    const trialA = probe.trials[0]
+    assert.equal(trialA.valid, false)
+    assert.equal(trialA.error, 'probe-arm-failed')
+    assert.equal(trialA.applicability, 'unavailable', 'pre-injection failure must not claim applied')
+    const decisionRecord = envelopes.find((envelope) =>
+      envelope.event === 'compose/applied' || envelope.event === 'compose/rejected')
+    assert.ok(decisionRecord, 'the cycle still records a compose decision')
+    const receiptA = decisionRecord.payload.gate.candidates.find((item) => item.candidateId === trialA.candidateId)
+    assert.equal(receiptA.probed, false)
+    assert.equal(receiptA.admitted, false)
+    if (decisionRecord.event === 'compose/applied') {
+      assert.ok(!decisionRecord.payload.appliedCandidateIds.includes(trialA.candidateId))
+    } else {
+      assert.equal(decisionRecord.payload.reason, 'low-evidence')
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
 })

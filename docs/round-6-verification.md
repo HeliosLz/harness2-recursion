@@ -75,3 +75,14 @@ elapsed: 116.7s
 | positive | `npm run stage0:r6:positive` | PASS：20 cycles，**20/20 applied**，每 cycle 恰 1 canonical persona edit，probe 80（2 controls + 2 trials） |
 
 这两条把“gate 只会拒绝”的验证缺口补上：positive 臂证明 admissible persona 会经 `systemPrompt.section` 注入、trial 有效并被 applied。
+
+## 6. PR-1.2 修复后复跑（追加）
+
+| 检查 | 结果 |
+| :-- | :-- |
+| `npm run verify` | **47/47** |
+| `npm run stage0`（v3 归档） | PASS，NULL/ADVERSARIAL 20/20（v3 未变） |
+| `npm run stage0:r6`（负向） | PASS：0 applied / 20 rejected；候选不可模拟 → **0 probe child**；gate `controlCount=0 && stable=false` |
+| `npm run stage0:r6:positive`（正向） | PASS：20/20 applied；**每候选 2 matched controls + 1 treatment**（probe 120）；gate `controlCount=4 && stable=true`；每 cycle 1 edit |
+
+这一轮验证了「per-candidate controls 不被跨候选平均」「失败不重试」「receipt/payload 一致」「observe-only 只取证」。
