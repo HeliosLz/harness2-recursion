@@ -1,6 +1,6 @@
 # Round-6 设计：Offline profile-patch 闭环 + compose-gate 修复
 
-- 状态：设计冻结草案（arena 合成，base = candidate-1；grafts 见 `docs/round-6-synthesis.md`）
+- 状态：设计冻结草案（arena 合成，base = candidate-1；grafts 见 `docs/round-6-synthesis.md`）。**PR-1 已实现并验收**（见 `docs/round-6-pr1.md`）；PR-2..PR-5 待实现。
 - 目标版本：`harness2-recursion@0.3.0`
 - 前提：**不依赖任何上游 API**（不使用 `applyHarnessPatch`；不新增 dsh 子命令）
 - 关联证据：Stage-0 证伪（[`e2e/stage0/RESULTS.md`](../e2e/stage0/RESULTS.md)）、arena 验证（[`docs/round-6-verification.md`](round-6-verification.md)）

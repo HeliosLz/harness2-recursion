@@ -247,3 +247,28 @@ interface ProposeFailedPayload {
 
 - 复现：`npm run stage0`；结果 [e2e/stage0/RESULTS.md](e2e/stage0/RESULTS.md)。
 - **在第六轮修复 fitness 评估（recovery control arm / placebo 拒绝 / 内容校验）之前，禁止用 COMPOSE 或经验质量作为“自进化有效”的证据**；本次发现不改变已冻结的 confidence 公式与事件 schema，但明确标注其适用性前提。
+
+## 10. 第六轮 PR-1 修订（Gate-v4，已实现）
+
+> 完整设计见 [`docs/round-6-design.md`](docs/round-6-design.md)；实现记录见 [`docs/round-6-pr1.md`](docs/round-6-pr1.md)。
+
+### R6-1（additive 可选字段，已实现）
+
+- `TrialRecord.applicability?: 'applied' | 'unavailable'`；
+- `ProbeCompletedPayload.controlMetrics?: ProbeMetrics[]`（最多 4；Gate-v4 要求 2）；
+- `ComposeAppliedPayload.gate?` / `ComposeRejectedPayload.gate?`（Gate-v4 receipt，含 candidates 明细、`appliedCandidateIds`、`rejectedCandidateIds`、`reason`）；
+- 新增校验器 `validateGateReceipt`；旧 v3 payload 仍然合法。
+
+### R6-2（gate 语义，已实现）
+
+- Config：`gatePolicy: 'v4' | 'v3'`（默认 **v4**；v3 只用于归档复现）、`controlReplicates`（默认 2）、`maxAppliedEdits`（默认 1）。
+- Gate-v4：**admission ≠ certification**。空 control/少于 2/control 不稳定/不可模拟 → `low-evidence` fail closed；不静默回退 v3。
+- Deadband：`completion/toolFailures/stepCount` 对 2 个 control 的均值与噪声取死区；**tokenCost 不参与排名**，只做 `≤1.25×control` guard。
+- 不可准入候选映射到既有 reason `regression`（不新增 reason union 成员）；`rejectedCandidateIds` 仍与 trials 相交。
+- 只有 `set-persona-prefix` 可在 probe 内模拟（agent-scoped `systemPrompt.section({name:'deployment:persona-prefix'})`）；其余 canonical 编辑 `applicability:'unavailable'`，留待离线 applier。
+- Admissibility 白名单：`system-prompt/set-persona-{prefix,suffix}`、`tool-guidance/set-tool-order`、`plugins/{disable-row,enable-row,set-harness2-config}`；deny lexicon + 变量/形状校验；`FORBIDDEN_CONFIG_KEYS` 禁止 `metricWeights`/`gatePolicy`/路径/模型等自调裁判键。
+
+### 尚未实现的 R6-3/R6-4
+
+- R6-3（meta 只从 evaluations 学习、旧经验 quarantine）留待 PR-5；
+- R6-4（edit body / apply / eval sidecars、offline applier）留待 PR-2/PR-3/PR-4。

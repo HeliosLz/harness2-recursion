@@ -2,6 +2,8 @@ node_modules/
 packages/*/lib/
 e2e/artifacts/
 e2e/stage0/artifacts/
+e2e/stage0-r6/home/
+e2e/stage0-r6/artifacts/
 e2e/round6-spike/artifacts/
 e2e/.home/
 *.log

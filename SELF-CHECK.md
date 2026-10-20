@@ -86,3 +86,11 @@ Sessions: 2 (exit 0, final answer printed)
 - 判定：**GATE INVALID（橡皮章）**。根因：trial 的 `completion` 对比 baseline 恒为 +1（`trial=true` vs `baseline=false`），且 `decideCompose` 从不检查编辑内容。
 - 复现：`npm run stage0`（见 [`e2e/stage0/README.md`](e2e/stage0/README.md)）；结果 [`e2e/stage0/RESULTS.md`](e2e/stage0/RESULTS.md)，合成记录 [`e2e/stage0/SYNTHESIS.md`](e2e/stage0/SYNTHESIS.md)。
 - **影响**：在 P0 修复前，不得用本原型的 COMPOSE/经验质量作为“自进化有效”的证据；第六轮应先修 fitness 评估，再谈在线/离线形态。
+
+## 七、Round-6 PR-1（Gate-v4 admission，2026-10-20）
+
+- 实现：admissibility predicate + Gate-v4（2 个真实 recovery control、deadband、token guard、fail-closed）+ persona in-probe 注入 + canonical PROPOSE_SYSTEM。
+- 自动化：`npm run verify` **37/37**；归档 Stage-0 replay **v3 20/20 → v4 0/20**（无 control 的旧 payload 全部 `low-evidence`，无静默回退）。
+- Live `npm run stage0:r6`：**PASS**，20 cycles / 20 sessions，**compose/applied = 0**，20 个 compose/rejected，每 cycle 恰 2 条 control metrics，40/40 candidate receipt 不可准入，`gate/v4` receipts 20/20，116.7s。
+- 证据：[`docs/round-6-pr1.md`](docs/round-6-pr1.md)、[`e2e/stage0-r6/RESULTS.md`](e2e/stage0-r6/RESULTS.md)。
+- 仍待：PR-2 edit-body sidecar、PR-3 offline applier、PR-4 Gate-B harness、PR-5 meta verified-experience（当前 meta 仍消费 compose 决策）。

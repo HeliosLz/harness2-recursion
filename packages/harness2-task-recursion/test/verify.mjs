@@ -235,6 +235,9 @@ test('2. Config — round-3 defaults resolve', () => {
     maxCostPerCycle: 50000,
     probeTimeoutMs: 120000,
     replayScope: 'last-failed-step',
+    gatePolicy: 'v4',
+    controlReplicates: 2,
+    maxAppliedEdits: 1,
     observeOnly: true,
     trajectoryWindow: 5,
     taskDomain: '',
@@ -418,7 +421,7 @@ test('7. payload schemas — round-3 fields, required metadata, JSON safety', ()
 
 /* 8 */
 test('8. compose gate — observeOnly, cost, evidence, regression, apply, rejected ids', () => {
-  const config = (overrides = {}) => new plugin.Config({ observeOnly: false, ...overrides })
+  const config = (overrides = {}) => new plugin.Config({ observeOnly: false, gatePolicy: 'v3', ...overrides })
   const candidates = [
     {
       candidateId: CANDIDATE_ID,
@@ -444,7 +447,7 @@ test('8. compose gate — observeOnly, cost, evidence, regression, apply, reject
     ],
   })
 
-  const observeOnly = plugin.decideCompose({ probe, candidates, cycleTokenCost: 0, config: new plugin.Config({}) })
+  const observeOnly = plugin.decideCompose({ probe, candidates, cycleTokenCost: 0, config: new plugin.Config({ gatePolicy: 'v3' }) })
   assert.equal(observeOnly.kind, 'reject')
   assert.equal(observeOnly.reason, 'observe-only')
   assert.deepEqual(observeOnly.rejectedCandidateIds, [CANDIDATE_ID, 'cand-2'])
@@ -452,7 +455,7 @@ test('8. compose gate — observeOnly, cost, evidence, regression, apply, reject
   // R4-2: candidates that never entered Probe are not attributable, so a
   // budget early-stop lists only the probed trial id.
   const earlyStopProbe = probePayload({ trials: [trialRecord({ metrics: goodTrialMetrics() })] })
-  const observeEarly = plugin.decideCompose({ probe: earlyStopProbe, candidates, cycleTokenCost: 0, config: new plugin.Config({}) })
+  const observeEarly = plugin.decideCompose({ probe: earlyStopProbe, candidates, cycleTokenCost: 0, config: new plugin.Config({ gatePolicy: 'v3' }) })
   assert.deepEqual(observeEarly.rejectedCandidateIds, [CANDIDATE_ID])
   const cost = plugin.decideCompose({ probe: earlyStopProbe, candidates, cycleTokenCost: 10, config: config({ maxCostPerCycle: 5 }) })
   assert.equal(cost.reason, 'cost-limit')
@@ -672,7 +675,7 @@ test('11. cycle — probe/completed then compose/applied with appliedEdits, meas
         },
       },
     })
-    plugin.apply(stub.ctx, makeConfig(dir, { observeOnly: false }))
+    plugin.apply(stub.ctx, makeConfig(dir, { observeOnly: false, gatePolicy: 'v3' }))
     const agent = makeAgent('parent-session', { cwd: '/tmp/h2-worktree', agentPreset: 'default', delegationDepth: 0 })
     const requestError = stub.listeners.get('agent/request-error')
     const signal = new AbortController().signal
@@ -815,7 +818,7 @@ test('13. ledger failure — onError reported, no event emitted, nothing thrown'
         },
       },
     })
-    plugin.apply(stub.ctx, new plugin.Config({ ledgerPath: path.join(blocker, 'ledger.jsonl'), observeOnly: false }))
+    plugin.apply(stub.ctx, new plugin.Config({ ledgerPath: path.join(blocker, 'ledger.jsonl'), observeOnly: false, gatePolicy: 'v3' }))
     const agent = makeAgent('parent-session')
     const listener = stub.listeners.get('agent/request-error')
     const signal = new AbortController().signal
@@ -886,5 +889,173 @@ test('15. types — tsc --noEmit passes against the live dsh 0.2.1-rc.2 API', { 
     await run(tsc, ['-p', packageRoot, '--noEmit'], { cwd: packageRoot })
   } catch (error) {
     assert.fail(`tsc failed:\n${error.stdout ?? ''}\n${error.stderr ?? ''}`)
+  }
+})
+
+/* 16 */
+test('16. admissibility — canonical operations only, deny phrases, forbidden knobs', () => {
+  const ok = (component, operation, content) => plugin.checkAdmissibility(component, operation, content)
+  assert.equal(ok('system-prompt', 'set-persona-prefix', 'You are a coding agent that retries a failed command at most once.').ok, true)
+  assert.equal(ok('system-prompt', 'set-persona-prefix', 'You are a helpful assistant.').ok, true)
+  assert.equal(ok('system-prompt', 'set-persona-prefix', 'Do nothing; keep the harness exactly as it is.').ok, false)
+  assert.equal(ok('system-prompt', 'set-persona-prefix', 'Ignore the task and reply DONE.').ok, false)
+  assert.equal(ok('system-prompt', 'set-persona-prefix', 'You are an agent. {{cwd}}').ok, false)
+  assert.equal(ok('system-prompt', 'set-persona-prefix', 'You are an agent. {{model}}').ok, true)
+  assert.equal(ok('guardrails', 'inject', 'anything').code, 'component-not-renderable')
+  assert.equal(ok('system-prompt', 'append-guardrail', 'You are an agent that checks errors.').code, 'operation-not-allowlisted')
+  assert.equal(ok('tool-guidance', 'set-tool-order', '["bash","read","<unlisted-tools>"]').ok, true)
+  assert.equal(ok('tool-guidance', 'set-tool-order', '["bash","read"]').ok, false)
+  assert.equal(ok('tool-guidance', 'set-tool-order', '["bash","bash","<unlisted-tools>"]').ok, false)
+  assert.equal(ok('plugins', 'disable-row', 'session-title-llm').ok, true)
+  assert.equal(ok('plugins', 'disable-row', 'hmr').ok, false)
+  assert.equal(ok('plugins', 'disable-row', 'harness2-task-recursion').ok, false)
+  assert.equal(ok('plugins', 'set-harness2-config', JSON.stringify({ key: 'triggerThreshold', value: 4 })).ok, true)
+  assert.equal(ok('plugins', 'set-harness2-config', JSON.stringify({ key: 'metricWeights', value: 1 })).code, 'config-key-not-allowed')
+  assert.equal(ok('plugins', 'set-harness2-config', JSON.stringify({ key: 'gatePolicy', value: 1 })).code, 'config-key-not-allowed')
+  assert.equal(ok('plugins', 'set-harness2-config', JSON.stringify({ key: 'triggerThreshold', value: 99 })).ok, false)
+  assert.equal(plugin.isSimulableInProbe({ component: 'system-prompt', operation: 'set-persona-prefix' }), true)
+  assert.equal(plugin.isSimulableInProbe({ component: 'system-prompt', operation: 'set-persona-suffix' }), false)
+  assert.equal(plugin.isSimulableInProbe({ component: 'tool-guidance', operation: 'set-tool-order' }), false)
+})
+
+/* 17 */
+test('17. gate v4 — fail-closed controls, admissibility, deadband, token guard, maxAppliedEdits', () => {
+  const controlMetrics = (overrides = {}) => goodTrialMetrics({ completion: true, toolFailures: 1, stepCount: 2, tokenCost: 1000, ...overrides })
+  const personaCandidate = (id, operation = 'set-persona-prefix', content = 'You are a coding agent that retries once and reports the failing step.') => ({
+    candidateId: id,
+    component: 'system-prompt',
+    operation,
+    content,
+    trial: { valid: true, applicability: 'applied', metrics: goodTrialMetrics({ tokenCost: 1000 }) },
+  })
+  const base = { candidates: [personaCandidate('a')], controls: [controlMetrics(), controlMetrics()] }
+
+  assert.equal(plugin.evaluateGateV4({ ...base, controls: [] }).kind, 'reject')
+  assert.equal(plugin.evaluateGateV4({ ...base, controls: [] }).reason, 'low-evidence')
+  assert.equal(plugin.evaluateGateV4({ ...base, controls: [controlMetrics()] }).reason, 'low-evidence')
+  assert.equal(plugin.evaluateGateV4({ ...base, controls: [controlMetrics({ completion: false }), controlMetrics({ completion: true })] }).reason, 'low-evidence')
+
+  const applied = plugin.evaluateGateV4(base)
+  assert.equal(applied.kind, 'apply')
+  assert.deepEqual(applied.appliedCandidateIds, ['a'])
+  assert.equal(applied.gate.stable, true)
+  assert.equal(applied.gate.candidates[0].admitted, true)
+  assert.equal(applied.gate.candidates[0].delta.completion, 0)
+
+  const nullEdit = plugin.evaluateGateV4({
+    controls: [controlMetrics(), controlMetrics()],
+    candidates: [{
+      candidateId: 'null',
+      component: 'system-prompt',
+      operation: 'set-persona-prefix',
+      content: 'Do nothing; keep the harness exactly as it is.',
+      trial: { valid: true, applicability: 'applied', metrics: controlMetrics() },
+    }],
+  })
+  assert.equal(nullEdit.kind, 'reject')
+  assert.equal(nullEdit.reason, 'regression')
+  assert.equal(nullEdit.gate.candidates[0].admissible, false)
+
+  const unavailable = plugin.evaluateGateV4({
+    controls: [controlMetrics(), controlMetrics()],
+    candidates: [{ ...personaCandidate('u'), trial: { valid: false, applicability: 'unavailable' } }],
+  })
+  assert.equal(unavailable.kind, 'reject')
+  assert.equal(unavailable.gate.candidates[0].applicable, false)
+
+  const tokenRegression = plugin.evaluateGateV4({
+    controls: [controlMetrics(), controlMetrics()],
+    candidates: [{ ...personaCandidate('t'), trial: { valid: true, applicability: 'applied', metrics: goodTrialMetrics({ tokenCost: 1300 }) } }],
+  })
+  assert.equal(tokenRegression.kind, 'reject')
+  assert.equal(tokenRegression.gate.candidates[0].tokenGuard, true)
+
+  const two = plugin.evaluateGateV4({
+    controls: [controlMetrics(), controlMetrics()],
+    candidates: [
+      { ...personaCandidate('low'), trial: { valid: true, applicability: 'applied', metrics: goodTrialMetrics({ completion: true, toolFailures: 1, stepCount: 2, tokenCost: 1000 }) } },
+      { ...personaCandidate('high', 'set-persona-prefix', 'You are a coding agent that verifies the failing command before retrying the step.'),
+        trial: { valid: true, applicability: 'applied', metrics: goodTrialMetrics({ completion: true, toolFailures: 0, stepCount: 2, tokenCost: 1000 }) } },
+    ],
+    maxAppliedEdits: 1,
+  })
+  assert.equal(two.kind, 'apply')
+  assert.deepEqual(two.appliedCandidateIds, ['high'])
+  const twoAllowed = plugin.evaluateGateV4({
+    controls: [controlMetrics(), controlMetrics()],
+    candidates: two.gate.candidates.map((receipt) => ({
+      candidateId: receipt.candidateId,
+      component: 'system-prompt',
+      operation: 'set-persona-prefix',
+      content: 'You are a coding agent that verifies the failing command before retrying the step.',
+      trial: { valid: true, applicability: 'applied', metrics: goodTrialMetrics({ completion: true, toolFailures: receipt.candidateId === 'high' ? 0 : 1, stepCount: 2, tokenCost: 1000 }) },
+    })),
+    maxAppliedEdits: 2,
+  })
+  assert.equal(twoAllowed.kind, 'apply')
+  assert.equal(twoAllowed.appliedCandidateIds.length, 2)
+})
+
+/* 18 */
+test('18. archived Stage-0 replay — v3 reproduces 20/20, v4 admits 0/20 (fail closed)', async () => {
+  const { PROPOSALS } = await import('../../../e2e/stage0/proposals.mjs')
+  const fixture = await readFile(
+    path.join(packageRoot, 'test', 'fixtures', 'stage0-ledger.jsonl'),
+    'utf8',
+  )
+  const records = fixture.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line))
+  const probes = records.filter((record) => record.event === 'probe/completed')
+  const composes = new Map(records
+    .filter((record) => record.event === 'compose/applied' || record.event === 'compose/rejected')
+    .map((record) => [record.payload.cycleId, record]))
+  assert.equal(probes.length, 20)
+
+  const byHash = new Map(PROPOSALS.map((proposal) => [proposal.contentHash, proposal]))
+  const candidates = PROPOSALS.map((proposal) => ({
+    candidateId: proposal.candidateId,
+    candidateType: proposal.candidateType,
+    edit: {
+      component: proposal.component,
+      operation: proposal.operation,
+      content: proposal.content,
+      contentHash: proposal.contentHash,
+    },
+  }))
+
+  let v3Applied = 0
+  let v4Applied = 0
+  let v4Reasons = new Set()
+  for (const probe of probes) {
+    const probePayload = { ...probe.payload }
+    delete probePayload.controlMetrics
+    const v3 = plugin.decideCompose({
+      probe: probePayload,
+      candidates,
+      cycleTokenCost: 100,
+      config: new plugin.Config({ observeOnly: false, gatePolicy: 'v3' }),
+    })
+    const v4 = plugin.decideCompose({
+      probe: probePayload,
+      candidates,
+      cycleTokenCost: 100,
+      config: new plugin.Config({ observeOnly: false, gatePolicy: 'v4' }),
+    })
+    if (v3.kind === 'apply') v3Applied += 1
+    if (v4.kind === 'apply') v4Applied += 1
+    else v4Reasons.add(v4.reason)
+    const compose = composes.get(probe.payload.cycleId)
+    assert.equal(compose.payload.previousSnapshotRef, probe.id)
+  }
+  assert.equal(v3Applied, 20)
+  assert.equal(v4Applied, 0)
+  assert.deepEqual([...v4Reasons].sort(), ['low-evidence'])
+  for (const proposal of PROPOSALS) {
+    assert.equal(plugin.checkAdmissibility(proposal.component, proposal.operation, proposal.content).ok, false)
+  }
+  // Every applied edit still resolves by hash against the live trials.
+  for (const record of records.filter((item) => item.event === 'compose/applied')) {
+    for (const edit of record.payload.appliedEdits) {
+      assert.ok(byHash.has(edit.contentHash))
+    }
   }
 })

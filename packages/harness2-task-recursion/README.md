@@ -34,8 +34,16 @@ export function apply(ctx, config)
 - **第四轮**：Propose 两次失败 → 终态事件 `propose/failed`（`reason ∈ llm-error/schema-invalid/hash-mismatch/component-invalid`、`attempts=2`、`lastError`、可选 baseline），账本 `event='propose/failed'`，append 成功后才 emit 且与同 cycleId 的 probe/compose 事件互斥；`rejectedCandidateIds` 只取 trials 中出现过的 id（R4-2）。
 - `TODO(ROUND2_APPLY)`（运行时补丁 API）、`TODO(ROUND2_SANDBOX)`（Probe 沙箱）保留。
 
+## Round-6 PR-1（Gate-v4）
+
+- 新配置：`gatePolicy: v4 | v3`（默认 v4；v3 仅供归档 replay）、`controlReplicates`（默认 2）、`maxAppliedEdits`（默认 1）。
+- Gate-v4：admission ≠ certification；2 个真实 recovery control；deadband；tokenCost 只做 25% guard；control 缺失/不稳定 → `low-evidence` fail closed。
+- 仅 `set-persona-prefix` 可在 probe 内模拟（agent-scoped `systemPrompt.section`）；其余 canonical 编辑 `applicability:'unavailable'`，等待离线 applier。
+- 白名单/deny lexicon/自调裁判键见 `src/admissibility.ts`；`PROPOSE_SYSTEM` 已改为 canonical operations。
+
 ## 验证
 
 ```bash
-npm run build && node --test test/verify.mjs   # 15 项（含 propose/failed 与 R4-2 用例）
+npm run build && node --test test/verify.mjs   # 18 项（含 admissibility、gate-v4、归档 replay）
+npm run stage0:r6                              # live Gate-v4 验收（需要 dsh 0.2.1 CLI）
 ```

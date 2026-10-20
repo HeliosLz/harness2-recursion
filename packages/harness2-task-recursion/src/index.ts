@@ -40,8 +40,36 @@ import {
   LEGACY_COMPONENT_MIGRATION,
   isComponentName,
 } from './constants.ts'
+import {
+  ADMISSIBLE_OPERATIONS,
+  FORBIDDEN_CONFIG_KEYS,
+  PERSONA_PREFIX_SECTION,
+  checkAdmissibility,
+  isSimulableInProbe,
+} from './admissibility.ts'
+import type { Admissibility, PatchComponent, PatchOperation } from './admissibility.ts'
+import {
+  GATE_V4_RANK_WEIGHTS,
+  GATE_V4_TOKEN_GUARD_RATIO,
+  evaluateGateV4,
+} from './gate-v4.ts'
+import type { GateMetrics, GateV4Receipt } from './gate-v4.ts'
 
 export { COMPONENT_NAMES, LEGACY_COMPONENT_MIGRATION, isComponentName }
+export {
+  ADMISSIBLE_OPERATIONS,
+  FORBIDDEN_CONFIG_KEYS,
+  PERSONA_PREFIX_SECTION,
+  checkAdmissibility,
+  isSimulableInProbe,
+} from './admissibility.ts'
+export type { Admissibility, PatchComponent, PatchOperation } from './admissibility.ts'
+export {
+  GATE_V4_RANK_WEIGHTS,
+  GATE_V4_TOKEN_GUARD_RATIO,
+  evaluateGateV4,
+} from './gate-v4.ts'
+export type { GateCandidateInput, GateMetrics, GateV4Receipt } from './gate-v4.ts'
 export type { ComponentName } from './constants.ts'
 
 /** Cordis plugin name used by loader diagnostics. */
@@ -62,6 +90,15 @@ export const Config = Schema.object({
     Schema.const('last-failed-step'),
     Schema.const('full-task'),
   ]).default('last-failed-step'),
+  /** Round-6: v4 admission is the default; v3 exists only for archived replay. */
+  gatePolicy: Schema.union([
+    Schema.const('v4'),
+    Schema.const('v3'),
+  ]).default('v4'),
+  /** Recovery-control replicates for Gate-v4; 2 is required by the design. */
+  controlReplicates: Schema.number().default(2),
+  /** How many admitted edits a single cycle may apply (1 keeps attribution atomic). */
+  maxAppliedEdits: Schema.number().default(1),
   observeOnly: Schema.boolean().default(true),
   trajectoryWindow: Schema.number().default(5),
   taskDomain: Schema.string().default(''),
@@ -112,6 +149,8 @@ export interface TrialRecord {
   readonly valid: boolean
   readonly metrics?: ProbeMetrics
   readonly error?: string
+  /** Round-6: whether the edit was actually in effect for this trial. */
+  readonly applicability?: 'applied' | 'unavailable'
 }
 
 /** Payload of `probe/completed`. */
@@ -121,6 +160,8 @@ export interface ProbeCompletedPayload {
   readonly trials: readonly TrialRecord[]
   readonly evidenceSummary: string
   readonly cycleId: string
+  /** Round-6: no-edit recovery-control metrics (Gate-v4 admission). */
+  readonly controlMetrics?: readonly ProbeMetrics[]
 }
 
 /** Compose application path. */
@@ -144,6 +185,8 @@ export interface ComposeAppliedPayload {
   readonly previousSnapshotRef: string
   readonly ledgerEntryId: string
   readonly applyMode: ApplyMode
+  /** Round-6 Gate-v4 receipt (optional; v3 records omit it). */
+  readonly gate?: GateV4Receipt
 }
 
 /** Why a compose decision was rejected. */
@@ -162,6 +205,8 @@ export interface ComposeRejectedPayload {
   readonly rejectedCandidateIds: readonly string[]
   readonly baselineMetrics: ProbeMetrics
   readonly trials: readonly TrialRecord[]
+  /** Round-6 Gate-v4 receipt (optional; v3 records omit it). */
+  readonly gate?: GateV4Receipt
 }
 
 /** Why the Propose stage produced no usable candidates (round 4). */
@@ -322,10 +367,10 @@ export function validateTrialRecord(value: unknown): string[] {
     || !hasExactKeys(
       value,
       ['candidateId', 'candidateType', 'component', 'operation', 'editContentHash', 'valid'],
-      ['metrics', 'error'],
+      ['metrics', 'error', 'applicability'],
     )
   ) {
-    return ['trial must have exactly candidateId/candidateType/component/operation/editContentHash/valid (+ metrics/error)']
+    return ['trial must have exactly candidateId/candidateType/component/operation/editContentHash/valid (+ metrics/error/applicability)']
   }
   const errors: string[] = []
   if (typeof value.candidateId !== 'string' || value.candidateId.length === 0) {
@@ -340,6 +385,11 @@ export function validateTrialRecord(value: unknown): string[] {
   }
   if (!isSha256Hash(value.editContentHash)) errors.push('trial.editContentHash must be sha256:<hex>')
   if (typeof value.valid !== 'boolean') errors.push('trial.valid must be boolean')
+  if (value.applicability !== undefined
+    && value.applicability !== 'applied'
+    && value.applicability !== 'unavailable') {
+    errors.push('trial.applicability must be applied | unavailable')
+  }
   if (value.valid === true) {
     if (value.metrics === undefined) errors.push('valid trial requires metrics')
     else errors.push(...validateProbeMetrics(value.metrics))
@@ -370,13 +420,34 @@ export function trialMetadataComplete(value: unknown): boolean {
     && isSha256Hash(value.editContentHash)
 }
 
+/** Validate the optional Round-6 Gate-v4 receipt embedded in payloads. */
+export function validateGateReceipt(value: unknown): string[] {
+  if (!isRecord(value)) return ['gate must be an object']
+  const errors: string[] = []
+  if (value.version !== 'gate/v4') errors.push('gate.version must be gate/v4')
+  if (value.policy !== 'v4') errors.push('gate.policy must be v4')
+  if (typeof value.controlCount !== 'number' || value.controlCount < 0) errors.push('gate.controlCount must be ≥0')
+  if (typeof value.stable !== 'boolean') errors.push('gate.stable must be boolean')
+  if (!Array.isArray(value.candidates)) errors.push('gate.candidates must be an array')
+  if (!Array.isArray(value.appliedCandidateIds)) errors.push('gate.appliedCandidateIds must be an array')
+  if (!Array.isArray(value.rejectedCandidateIds)) errors.push('gate.rejectedCandidateIds must be an array')
+  if (value.reason !== undefined && value.reason !== 'low-evidence' && value.reason !== 'regression') {
+    errors.push('gate.reason must be low-evidence | regression when present')
+  }
+  return errors
+}
+
 /** Validate a payload against the frozen `probe/completed` schema. */
 export function validateProbeCompletedPayload(value: unknown): string[] {
   if (
     !isRecord(value)
-    || !hasExactKeys(value, ['taskId', 'baselineMetrics', 'trials', 'evidenceSummary', 'cycleId'])
+    || !hasExactKeys(
+      value,
+      ['taskId', 'baselineMetrics', 'trials', 'evidenceSummary', 'cycleId'],
+      ['controlMetrics'],
+    )
   ) {
-    return ['probe/completed must have exactly taskId/baselineMetrics/trials/evidenceSummary/cycleId']
+    return ['probe/completed must have taskId/baselineMetrics/trials/evidenceSummary/cycleId (+ optional controlMetrics)']
   }
   const errors: string[] = []
   if (typeof value.taskId !== 'string' || value.taskId.length === 0) errors.push('taskId must be a non-empty string')
@@ -391,6 +462,13 @@ export function validateProbeCompletedPayload(value: unknown): string[] {
     errors.push('evidenceSummary must be a non-empty string')
   } else if (value.evidenceSummary.length > MAX_EVIDENCE_SUMMARY) {
     errors.push(`evidenceSummary must be ≤ ${MAX_EVIDENCE_SUMMARY} characters`)
+  }
+  if (value.controlMetrics !== undefined) {
+    if (!Array.isArray(value.controlMetrics) || value.controlMetrics.length > 4) {
+      errors.push('controlMetrics must be an array of at most 4 metrics')
+    } else {
+      for (const metrics of value.controlMetrics) errors.push(...validateProbeMetrics(metrics))
+    }
   }
   return errors
 }
@@ -419,7 +497,7 @@ export function validateComposeAppliedPayload(value: unknown): string[] {
     || !hasExactKeys(value, [
       'taskId', 'cycleId', 'appliedCandidateIds', 'appliedEdits',
       'appliedComponents', 'previousSnapshotRef', 'ledgerEntryId', 'applyMode',
-    ])
+    ], ['gate'])
   ) {
     return ['compose/applied has an unexpected field set']
   }
@@ -464,6 +542,7 @@ export function validateComposeAppliedPayload(value: unknown): string[] {
   if (value.applyMode !== 'pre-step-patch' && value.applyMode !== 'next-task-ledger' && value.applyMode !== 'noop-todo') {
     errors.push('applyMode must be pre-step-patch | next-task-ledger | noop-todo')
   }
+  if (value.gate !== undefined) errors.push(...validateGateReceipt(value.gate))
   return errors
 }
 
@@ -474,9 +553,10 @@ export function validateComposeRejectedPayload(value: unknown): string[] {
     || !hasExactKeys(
       value,
       ['taskId', 'cycleId', 'reason', 'rejectedCandidateIds', 'baselineMetrics', 'trials'],
+      ['gate'],
     )
   ) {
-    return ['compose/rejected must have exactly taskId/cycleId/reason/rejectedCandidateIds/baselineMetrics/trials']
+    return ['compose/rejected must have exactly taskId/cycleId/reason/rejectedCandidateIds/baselineMetrics/trials (+ optional gate)']
   }
   const errors: string[] = []
   if (typeof value.taskId !== 'string' || value.taskId.length === 0) errors.push('taskId must be a non-empty string')
@@ -499,6 +579,7 @@ export function validateComposeRejectedPayload(value: unknown): string[] {
       break
     }
   }
+  if (value.gate !== undefined) errors.push(...validateGateReceipt(value.gate))
   return errors
 }
 
@@ -982,16 +1063,78 @@ export type ComposeDecision =
       readonly reason: ComposeRejectedReason
       /** Contract-level rejected set (payload builder intersects with trials). */
       readonly rejectedCandidateIds: readonly string[]
+      readonly gate?: GateV4Receipt
     }
   | {
       readonly kind: 'apply'
       readonly appliedCandidateIds: readonly string[]
       readonly appliedComponents: readonly string[]
       readonly candidates: readonly HarnessCandidate[]
+      readonly gate?: GateV4Receipt
     }
 
 /** Deterministic compose gate over the frozen decision procedure. */
 export function decideCompose(input: {
+  readonly probe: ProbeCompletedPayload
+  readonly candidates: readonly HarnessCandidate[]
+  readonly cycleTokenCost: number
+  readonly config: Config
+}): ComposeDecision {
+  if (input.config.gatePolicy === 'v3') return decideComposeV3(input)
+  return decideComposeV4(input)
+}
+
+/** Round-6 Gate-v4 admission path (fail-closed; no silent v3 fallback). */
+function decideComposeV4(input: {
+  readonly probe: ProbeCompletedPayload
+  readonly candidates: readonly HarnessCandidate[]
+  readonly cycleTokenCost: number
+  readonly config: Config
+}): ComposeDecision {
+  const trialIds = input.probe.trials.map((trial) => trial.candidateId)
+  if (input.config.observeOnly) {
+    return { kind: 'reject', reason: 'observe-only', rejectedCandidateIds: trialIds }
+  }
+  if (input.cycleTokenCost > input.config.maxCostPerCycle) {
+    return { kind: 'reject', reason: 'cost-limit', rejectedCandidateIds: trialIds }
+  }
+  const trialById = new Map(input.probe.trials.map((trial) => [trial.candidateId, trial]))
+  const gateInput = input.candidates.map((candidate) => ({
+    candidateId: candidate.candidateId,
+    component: candidate.edit.component,
+    operation: candidate.edit.operation,
+    content: candidate.edit.content,
+    trial: trialById.get(candidate.candidateId) ?? { valid: false as const },
+  }))
+  const gate = evaluateGateV4({
+    controls: (input.probe.controlMetrics ?? []) as readonly GateMetrics[],
+    candidates: gateInput,
+    maxAppliedEdits: Math.max(1, Math.min(2, Math.floor(input.config.maxAppliedEdits))),
+  })
+  if (gate.kind === 'reject') {
+    const rejected = gate.rejectedCandidateIds.filter((id) => trialIds.includes(id))
+    return {
+      kind: 'reject',
+      reason: gate.reason,
+      rejectedCandidateIds: rejected.length > 0 ? rejected : trialIds,
+      gate: gate.gate,
+    }
+  }
+  const byId = new Map(input.candidates.map((candidate) => [candidate.candidateId, candidate]))
+  const candidates = gate.appliedCandidateIds
+    .map((candidateId) => byId.get(candidateId))
+    .filter((candidate): candidate is HarnessCandidate => candidate !== undefined)
+  return {
+    kind: 'apply',
+    appliedCandidateIds: candidates.map((candidate) => candidate.candidateId),
+    appliedComponents: candidates.map((candidate) => candidate.edit.component),
+    candidates,
+    gate: gate.gate,
+  }
+}
+
+/** Round-3/4/5 Gate-v3 procedure, kept only for archived replay. */
+function decideComposeV3(input: {
   readonly probe: ProbeCompletedPayload
   readonly candidates: readonly HarnessCandidate[]
   readonly cycleTokenCost: number
@@ -1131,10 +1274,19 @@ Given the recent failure trajectory, the current harness configuration snapshot,
 and prior experience entries, propose exactly TWO candidate harness edits:
 one with candidateType "invariant" and one with candidateType "domain".
 Answer with STRICT JSON only, no markdown:
-{"candidates":[{"candidateType":"invariant","edit":{"component":"<one of the eight component names>","operation":"<short operation name>","content":"<complete patch text>","contentHash":"sha256:<hex>"}},{"candidateType":"domain","edit":{...}}]}
-Rules: component MUST be one of: ${COMPONENT_NAMES.join(', ')}.
-content must be directly applicable text, ≤4000 characters. Do not invent
-metrics. Do not assign confidence.`
+{"candidates":[{"candidateType":"invariant","edit":{"component":"<component>","operation":"<operation>","content":"<content>","contentHash":"sha256:<hex>"}},{"candidateType":"domain","edit":{...}}]}
+Round-6 canonical operations (ONLY these are admitted):
+- component "system-prompt", operation "set-persona-prefix" or "set-persona-suffix":
+  content is a persona statement starting with "You are" / "The agent" / "This agent" / "Act as" (20-2000 chars).
+- component "tool-guidance", operation "set-tool-order":
+  content is a JSON array of registered tool names with exactly one "<unlisted-tools>" entry.
+- component "plugins", operation "disable-row" or "enable-row":
+  content is exactly one loader row id present in the snapshot.
+- component "plugins", operation "set-harness2-config":
+  content is JSON {"key":"<tunable key>","value":<number>} (never metricWeights, gatePolicy, paths or models).
+Rules: content ≤4000 characters; no "do nothing"/"ignore the task"/"reply DONE"
+style instructions; {{model}} and {{provider}} are the only variables. Do not
+invent metrics. Do not assign confidence.`
 
 /** SHA-256 hex digest of a string. */
 export function sha256(value: string): string {
@@ -1239,7 +1391,33 @@ export interface ProposalResult {
 
 export interface ProbeOutcome {
   readonly trials: readonly TrialRecord[]
+  /** Round-6 recovery-control metrics (empty in gatePolicy v3). */
+  readonly controlMetrics: readonly ProbeMetrics[]
   readonly tokenCost: number
+}
+
+/** Prompt for a no-edit recovery-control child (Gate-v4 admission). */
+export function buildControlPrompt(input: {
+  readonly taskId: string
+  readonly cycleId: string
+  readonly baseline: ProbeMetrics
+  readonly replayScope: Config['replayScope']
+  readonly trajectorySummary: string
+}): string {
+  return [
+    'You are an ADVISORY replay subagent (control arm) for a task-recursion system.',
+    'Your tools are NOT sandbox-restricted yet (TODO(ROUND2_SANDBOX)); do not',
+    'modify the workspace, install packages, or run mutating commands.',
+    `taskId: ${input.taskId}`,
+    `cycleId: ${input.cycleId}`,
+    `replayScope: ${input.replayScope}`,
+    'NO candidate edit is applied in this arm. Replay the failed step as faithfully',
+    'as possible with the unchanged harness, then finish.',
+    'baseline metrics:',
+    JSON.stringify(input.baseline),
+    'failure summary:',
+    input.trajectorySummary,
+  ].join('\n')
 }
 
 export function buildProbePrompt(input: {
@@ -1429,7 +1607,6 @@ async function runTrial(
     operation: input.candidate.edit.operation,
     editContentHash: input.candidate.edit.contentHash,
   }
-  let child: AgentHandle | undefined
   const prompt = buildProbePrompt({
     taskId: input.taskId,
     cycleId: input.cycleId,
@@ -1438,15 +1615,67 @@ async function runTrial(
     replayScope: runtime.config.replayScope,
     trajectorySummary: input.trajectorySummary,
   })
+  const v4 = runtime.config.gatePolicy === 'v4'
+  const admissibility = checkAdmissibility(
+    input.candidate.edit.component,
+    input.candidate.edit.operation,
+    input.candidate.edit.content,
+  )
+  // v4 fail-closed: only simulable persona edits may be measured inside the
+  // advisory probe; everything else is queued for the offline applier later.
+  if (v4 && (!admissibility.ok || !isSimulableInProbe(admissibility.spec!))) {
+    return {
+      trial: {
+        ...baseTrial,
+        applicability: 'unavailable',
+        valid: false,
+        error: 'edit-not-in-effect',
+      },
+      tokenCost: estimateTokens(prompt),
+    }
+  }
+
+  let child: AgentHandle | undefined
+  let disposeSection: (() => void) | undefined
   const startedAt = performance.now()
   try {
     child = await createProbeChild(runtime, parent)
+    if (v4 && admissibility.ok) {
+      const agentContext = (child.agent as unknown as {
+        ctx?: { get?: (name: string) => unknown }
+      }).ctx
+      const systemPrompt = agentContext?.get?.('systemPrompt') as
+        | { section?: (section: { name: string; order: number; text: string }) => unknown }
+        | undefined
+      if (systemPrompt === undefined || typeof systemPrompt.section !== 'function') {
+        return {
+          trial: {
+            ...baseTrial,
+            applicability: 'unavailable',
+            valid: false,
+            error: 'edit-not-in-effect',
+          },
+          tokenCost: estimateTokens(prompt),
+        }
+      }
+      const disposable = systemPrompt.section({
+        name: PERSONA_PREFIX_SECTION,
+        order: 0,
+        text: admissibility.spec!.content,
+      })
+      if (typeof disposable === 'function') disposeSection = disposable as () => void
+    }
     child.agent.followup(childUserMessage(prompt))
     const idle = await waitForIdle(child.agent, runtime.config.probeTimeoutMs)
     const durationMs = performance.now() - startedAt
     if (!idle) {
       return {
-        trial: { ...baseTrial, valid: false, error: `timeout after ${runtime.config.probeTimeoutMs}ms` },
+        trial: {
+          ...baseTrial,
+          ...(v4 ? { applicability: 'applied' as const } : {}),
+          valid: false,
+          error: `timeout after ${runtime.config.probeTimeoutMs}ms`,
+        },
         tokenCost: estimateTokens(prompt),
       }
     }
@@ -1459,18 +1688,71 @@ async function runTrial(
     )
     const assistantText = lastAssistantText(child.agent)
     return {
-      trial: { ...baseTrial, valid: true, metrics },
+      trial: {
+        ...baseTrial,
+        ...(v4 ? { applicability: 'applied' as const } : {}),
+        valid: true,
+        metrics,
+      },
       tokenCost: metrics.tokenCost + estimateTokens(assistantText),
     }
   } catch (error) {
     return {
       trial: {
         ...baseTrial,
+        ...(v4 ? { applicability: 'unavailable' as const } : {}),
         valid: false,
         error: (error instanceof Error ? error.message : String(error)).slice(0, MAX_TRIAL_ERROR),
       },
       tokenCost: estimateTokens(prompt),
     }
+  } finally {
+    if (disposeSection !== undefined) {
+      try { disposeSection() } catch { /* effect disposal must not mask the trial */ }
+    }
+    if (child !== undefined) await child.dispose().catch(() => undefined)
+  }
+}
+
+/** One no-edit recovery-control trial. */
+async function runControlTrial(
+  runtime: TaskRuntime,
+  parent: Agent,
+  input: {
+    readonly taskId: string
+    readonly cycleId: string
+    readonly baseline: ProbeMetrics
+    readonly trajectorySummary: string
+  },
+): Promise<{ metrics?: ProbeMetrics; tokenCost: number }> {
+  const prompt = buildControlPrompt({
+    taskId: input.taskId,
+    cycleId: input.cycleId,
+    baseline: input.baseline,
+    replayScope: runtime.config.replayScope,
+    trajectorySummary: input.trajectorySummary,
+  })
+  let child: AgentHandle | undefined
+  const startedAt = performance.now()
+  try {
+    child = await createProbeChild(runtime, parent)
+    child.agent.followup(childUserMessage(prompt))
+    const idle = await waitForIdle(child.agent, runtime.config.probeTimeoutMs)
+    const durationMs = performance.now() - startedAt
+    if (!idle) return { tokenCost: estimateTokens(prompt) }
+    const metrics = metricsFromTranscript(
+      runtime.ctx,
+      child.agent,
+      child.agent.session.deriveMessages(),
+      durationMs,
+      prompt,
+    )
+    return {
+      metrics,
+      tokenCost: metrics.tokenCost + estimateTokens(lastAssistantText(child.agent)),
+    }
+  } catch {
+    return { tokenCost: estimateTokens(prompt) }
   } finally {
     if (child !== undefined) await child.dispose().catch(() => undefined)
   }
@@ -1489,7 +1771,23 @@ async function probeCandidates(
   },
 ): Promise<ProbeOutcome> {
   const trials: TrialRecord[] = []
+  const controlMetrics: ProbeMetrics[] = []
   let tokenCost = 0
+  const v4 = runtime.config.gatePolicy === 'v4'
+  const controlReplicates = v4
+    ? Math.max(2, Math.min(4, Math.floor(runtime.config.controlReplicates)))
+    : 0
+
+  const runControl = async (): Promise<void> => {
+    const result = await runControlTrial(runtime, parent, input)
+    tokenCost += result.tokenCost
+    if (result.metrics !== undefined) controlMetrics.push(result.metrics)
+  }
+
+  // Design order: C1, T1, T2, C2. The first control is always attempted; the
+  // gate fails closed if fewer than two valid controls exist.
+  if (controlReplicates > 0) await runControl()
+
   for (const candidate of input.candidates) {
     // Always run the first trial so probe/completed stays schema-valid; the
     // compose gate then rejects on cost.
@@ -1498,7 +1796,12 @@ async function probeCandidates(
     trials.push(result.trial)
     tokenCost += result.tokenCost
   }
-  return { trials, tokenCost }
+
+  for (let index = 1; index < controlReplicates; index += 1) {
+    await runControl()
+  }
+
+  return { trials, controlMetrics, tokenCost }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1721,6 +2024,7 @@ async function runComposeDecision(
         rejectedCandidateIds: rejectedIds,
         baselineMetrics: input.probe.baselineMetrics,
         trials: input.probe.trials,
+        ...(decision.gate === undefined ? {} : { gate: decision.gate }),
       }),
       validateComposeRejectedPayload,
       (payload) => runtime.ctx.emit('compose/rejected', payload),
@@ -1743,6 +2047,7 @@ async function runComposeDecision(
       previousSnapshotRef: previousSnapshotRef ?? 'none',
       ledgerEntryId: id,
       applyMode,
+      ...(decision.gate === undefined ? {} : { gate: decision.gate }),
     }),
     validateComposeAppliedPayload,
     (payload) => runtime.ctx.emit('compose/applied', payload),
@@ -1831,6 +2136,7 @@ async function runCycle(runtime: TaskRuntime, target: ProbeTarget): Promise<void
       trials: outcome.trials,
       evidenceSummary: trajectorySummary,
       cycleId,
+      ...(outcome.controlMetrics.length > 0 ? { controlMetrics: outcome.controlMetrics } : {}),
     }
     // Q1: never emit a trial with incomplete candidate metadata.
     if (probePayload.trials.some((trial) => !trialMetadataComplete(trial))) {

@@ -87,6 +87,8 @@ export interface TrialRecord {
   readonly valid: boolean
   readonly metrics?: ProbeMetrics
   readonly error?: string
+  /** Round-6 optional: whether the edit was in effect for this trial. */
+  readonly applicability?: 'applied' | 'unavailable'
 }
 
 export interface ProbeCompletedPayload {
@@ -95,6 +97,8 @@ export interface ProbeCompletedPayload {
   readonly trials: readonly TrialRecord[]
   readonly evidenceSummary: string
   readonly cycleId: string
+  /** Round-6 optional recovery-control metrics (meta does not consume them yet). */
+  readonly controlMetrics?: readonly ProbeMetrics[]
 }
 
 export type ApplyMode = 'pre-step-patch' | 'next-task-ledger' | 'noop-todo'
@@ -116,6 +120,8 @@ export interface ComposeAppliedPayload {
   readonly previousSnapshotRef: string
   readonly ledgerEntryId: string
   readonly applyMode: ApplyMode
+  /** Round-6 optional Gate-v4 receipt (meta does not consume it in PR-1). */
+  readonly gate?: Readonly<Record<string, unknown>>
 }
 
 export type ComposeRejectedReason =
@@ -132,6 +138,8 @@ export interface ComposeRejectedPayload {
   readonly rejectedCandidateIds: readonly string[]
   readonly baselineMetrics: ProbeMetrics
   readonly trials: readonly TrialRecord[]
+  /** Round-6 optional Gate-v4 receipt (meta does not consume it in PR-1). */
+  readonly gate?: Readonly<Record<string, unknown>>
 }
 
 /** Round-4 terminal state emitted by the task plugin (R4-1). */

@@ -52,3 +52,17 @@
 node e2e/round6-spike/gate-replay.mjs
 node e2e/round6-spike/run-spike.mjs
 ```
+
+## 4. PR-1 实现后的 live 验收（追加）
+
+`npm run stage0:r6` 在真实 dsh 0.2.1 headless 上跑 20 个 cycle（Gate-v4）：**PASS**
+
+```
+probe/completed: 20; compose/applied: 0; compose/rejected: 20
+controlMetrics lengths: [2]; bad controls: 0
+rejected ids ⊆ trials: true; gate/v4 receipts: 20
+inadmissible candidate receipts: 40
+elapsed: 116.7s
+```
+
+这补上了设计验证中“live RCA 未测”的缺口：每 cycle 都有 2 个真实 recovery control，且 NULL/ADVERSARIAL 0 applied。详见 [`round-6-pr1.md`](round-6-pr1.md) 与 [`e2e/stage0-r6/RESULTS.md`](../e2e/stage0-r6/RESULTS.md)。
