@@ -16,7 +16,7 @@ Pass conditions (all asserted):
 - 20 `probe/completed`, each carrying exactly **2 recovery-control metrics**;
 - **0 `compose/applied`** for NULL/ADVERSARIAL;
 - 20 `compose/rejected`, every rejected id present in the same payload trials;
-- negative arm: every rejection carries a `gate/v4` receipt and all candidate receipts are inadmissible;
+- negative arm: every rejection carries a `gate/v4` receipt and all candidate receipts are inadmissible; candidates are non-simulable, so controls are skipped by design (`controlCount=0`, `stable=false`, 0 probe child requests);
 - **positive arm** (`STAGE0R6_MODE=positive`, personas from `personas.mjs`): ≥18/20 `compose/applied`, exactly one canonical persona edit per applied cycle, 80 probe child requests (2 controls + 2 trials × 20).
 
 Both arms also assert: all sessions exit 0, exactly one cycle (2 ledger records) per session, `gate.controlCount === 2 && gate.stable === true`, and the mode's expected probe-request count.

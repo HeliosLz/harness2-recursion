@@ -253,3 +253,11 @@ $DSH_HOME/profiles/<profile>/cordis.patch.yml
 - 不把 probe 指标当作 fitness；准入 ≠ 认证。
 - **meta 不从决策学习**：`compose/*` 只作诊断；只有离线认证（`evaluations.jsonl` / committed revision）才写经验；无认证的旧条目默认隔离。
 - 不声称 Stage-0 证明“进化有效”；它只证明旧 gate 无效。
+
+## 8. PR-1.1 实现状态（2026-10-20）
+
+- **§1.2 matched control 已落地**：`probe-arm.ts` 的 `buildArmPrompt`/`runProbeArm` 让 control/treatment 共享骨架；control 用 `neutralPlaceholder(len, cycleId)` 替换 edit body，两臂注册**同长度** `deployment:persona-prefix` section。负向 live 的候选不可模拟时按设计跳过 controls（`controlCount=0`）。
+- **§1.3 allowlist 收窄**：候选只能行为调参（`triggerThreshold/repeatedFailureWindow/cooldownMs/trajectoryWindow`）；`maxAppliedEdits/controlReplicates/probeTimeoutMs/maxCostPerCycle/metricWeights/gatePolicy/路径/模型` 均不可调。`controlReplicates` 固定 2，`maxAppliedEdits` 1|2 且第二编辑须不同 component。
+- **§1.5 receipt**：只包含实际 probed 候选；`gate.rejectedCandidateIds` 与 payload 完全一致；validator 做 exact-key + 嵌套/集合/原因一致性校验。
+- **§1.3 TODO**：row 存在性 / tool 注册名需要 composed snapshot，PR-1.1 仅做 shape-valid；`PROPOSE_SYSTEM` 已标注 `TODO(PR-3, composed snapshot)`。
+- **§1.6 测试**：新增 matched-arm/prompt 长度、observeOnly 零 child、缺失 systemPrompt/空 transcript 诊断、receipt-payload 一致性、raw row 校验；`npm run verify` 44/44。

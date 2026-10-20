@@ -266,6 +266,7 @@ interface ProposeFailedPayload {
 - Gate-v4：**admission ≠ certification**。空 control/少于 2/control 不稳定/不可模拟 → `low-evidence` fail closed；不静默回退 v3。
 - Deadband：`completion/toolFailures/stepCount` 对 2 个 control 的均值与噪声取死区；**tokenCost 不参与排名**，只做 `≤1.25×control` guard。
 - 不可准入候选映射到既有 reason `regression`（不新增 reason union 成员）；`rejectedCandidateIds` 仍与 trials 相交。
+- **PR-1.1**：`controlReplicates` 固定为 2；`maxAppliedEdits` 仅 1|2，且第 2 编辑必须不同 component；3+ controls 视为 `low-evidence`；`applicability` 缺失即 `unavailable`；空 transcript trial 无效；Gate receipt 只包含实际 probed 候选，`gate.rejectedCandidateIds` 必须等于 payload 的 `rejectedCandidateIds`。
 - 只有 `set-persona-prefix` 可在 probe 内模拟（agent-scoped `systemPrompt.section({name:'deployment:persona-prefix'})`）；其余 canonical 编辑 `applicability:'unavailable'`，留待离线 applier。
 - Admissibility 白名单：`system-prompt/set-persona-{prefix,suffix}`、`tool-guidance/set-tool-order`、`plugins/{disable-row,enable-row,set-harness2-config}`；deny lexicon + 变量/形状校验；`FORBIDDEN_CONFIG_KEYS` 禁止 `metricWeights`/`gatePolicy`/路径/模型等自调裁判键。
 

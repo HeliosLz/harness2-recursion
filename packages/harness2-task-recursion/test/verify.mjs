@@ -18,6 +18,7 @@ const sourcePath = path.join(packageRoot, 'src', 'index.ts')
 const constantsPath = path.join(packageRoot, 'src', 'constants.ts')
 const siblingConstantsPath = path.resolve(packageRoot, '../harness2-meta-recursion/src/constants.ts')
 const plugin = await import(sourcePath)
+const probeArm = await import(path.join(packageRoot, 'src', 'probe-arm.ts'))
 const source = await readFile(sourcePath, 'utf8')
 const run = promisify(execFile)
 
@@ -142,6 +143,13 @@ function proposalJson() {
       build('domain', 'tool-guidance', 'add-reminder', 'Remind the model to inspect the tool error code first.'),
     ],
   })
+}
+
+function childHandleNoSystemPrompt(messages) {
+  const handle = childHandle(messages)
+  handle.agent.ctx = { get: () => undefined }
+  handle.sections = []
+  return handle
 }
 
 function childHandle(messages) {
@@ -280,6 +288,9 @@ test('2. Config — round-3 defaults resolve', () => {
   })
   assert.throws(() => new plugin.Config({ replayScope: 'sometimes' }))
   assert.throws(() => new plugin.Config({ triggerThreshold: 'three' }))
+  assert.throws(() => new plugin.Config({ controlReplicates: 3 }), 'controlReplicates is fixed at 2')
+  assert.throws(() => new plugin.Config({ maxAppliedEdits: 3 }), 'maxAppliedEdits is 1|2')
+  assert.equal(new plugin.Config({ maxAppliedEdits: 2 }).maxAppliedEdits, 2)
 })
 
 /* 3 */
@@ -829,10 +840,10 @@ test('12. rejections — observeOnly/cost rejected payloads carry rejectedCandid
   assert.deepEqual(
     costLimited.rejected.rejectedCandidateIds,
     costLimited.rejected.trials.map((trial) => trial.candidateId),
-    'R4-2: budget early-stop omits unprobed candidates',
+    'R4-2: every rejection id is present in the same trials',
   )
-  assert.equal(costLimited.rejected.rejectedCandidateIds.length, 1)
-  assert.equal(costLimited.probeTrials, 1)
+  assert.equal(costLimited.rejected.rejectedCandidateIds.length, 2)
+  assert.equal(costLimited.probeTrials, 2, 'non-simulable candidates yield schema-valid trials without children')
   assert.ok(!costLimited.emitted.includes('compose/applied'))
 })
 
@@ -938,6 +949,7 @@ test('16. admissibility — canonical operations only, deny phrases, forbidden k
   assert.equal(ok('guardrails', 'inject', 'anything').code, 'component-not-renderable')
   assert.equal(ok('system-prompt', 'append-guardrail', 'You are an agent that checks errors.').code, 'operation-not-allowlisted')
   assert.equal(ok('tool-guidance', 'set-tool-order', '["bash","read","<unlisted-tools>"]').ok, true)
+  assert.equal(ok('tool-guidance', 'set-tool-order', '["ba\u200Bsh","<unlisted-tools>"]').ok, false)
   assert.equal(ok('tool-guidance', 'set-tool-order', '["bash","read"]').ok, false)
   assert.equal(ok('tool-guidance', 'set-tool-order', '["bash","bash","<unlisted-tools>"]').ok, false)
   assert.equal(ok('plugins', 'disable-row', 'session-title-llm').ok, true)
@@ -953,7 +965,12 @@ test('16. admissibility — canonical operations only, deny phrases, forbidden k
     assert.equal(result.ok, false, `inherited config key ${key} must be rejected`)
     assert.equal(ok(key, 'set-persona-prefix', 'You are a valid agent that does the task.').ok, false)
   }
-  assert.equal(ok('plugins', 'set-harness2-config', JSON.stringify({ key: 'maxAppliedEdits', value: 2 })).ok, true)
+  assert.equal(ok('plugins', 'set-harness2-config', JSON.stringify({ key: 'maxAppliedEdits', value: 2 })).code, 'config-key-not-allowed')
+  assert.equal(ok('plugins', 'set-harness2-config', JSON.stringify({ key: 'controlReplicates', value: 2 })).code, 'config-key-not-allowed')
+  assert.equal(ok('plugins', 'set-harness2-config', JSON.stringify({ key: 'probeTimeoutMs', value: 600000 })).code, 'config-key-not-allowed')
+  assert.equal(ok('plugins', 'set-harness2-config', JSON.stringify({ key: 'maxCostPerCycle', value: 500000 })).code, 'config-key-not-allowed')
+  assert.equal(ok('plugins', 'disable-row', ' session ').ok, false)
+  assert.equal(ok('plugins', 'disable-row', 'ses\u200Bsion').ok, false)
   assert.equal(plugin.isSimulableInProbe({ component: 'system-prompt', operation: 'set-persona-prefix' }), true)
   assert.equal(plugin.isSimulableInProbe({ component: 'system-prompt', operation: 'set-persona-suffix' }), false)
   assert.equal(plugin.isSimulableInProbe({ component: 'tool-guidance', operation: 'set-tool-order' }), false)
@@ -974,6 +991,7 @@ test('17. gate v4 — fail-closed controls, admissibility, deadband, token guard
   assert.equal(plugin.evaluateGateV4({ ...base, controls: [] }).kind, 'reject')
   assert.equal(plugin.evaluateGateV4({ ...base, controls: [] }).reason, 'low-evidence')
   assert.equal(plugin.evaluateGateV4({ ...base, controls: [controlMetrics()] }).reason, 'low-evidence')
+  assert.equal(plugin.evaluateGateV4({ ...base, controls: [controlMetrics(), controlMetrics(), controlMetrics()] }).reason, 'low-evidence')
   assert.equal(plugin.evaluateGateV4({ ...base, controls: [controlMetrics({ completion: false }), controlMetrics({ completion: true })] }).reason, 'low-evidence')
 
   const applied = plugin.evaluateGateV4(base)
@@ -1048,19 +1066,51 @@ test('17. gate v4 — fail-closed controls, admissibility, deadband, token guard
   })
   assert.equal(two.kind, 'apply')
   assert.deepEqual(two.appliedCandidateIds, ['high'])
+  const sameComponent = plugin.evaluateGateV4({
+    controls: [controlMetrics(), controlMetrics()],
+    candidates: [
+      personaCandidate('one'),
+      { ...personaCandidate('two'), content: 'You are a coding agent that verifies the failing command before retrying the step.' },
+    ],
+    maxAppliedEdits: 2,
+  })
+  assert.equal(sameComponent.kind, 'apply')
+  assert.equal(sameComponent.appliedCandidateIds.length, 1, 'second edit must target a different component')
+
   const twoAllowed = plugin.evaluateGateV4({
     controls: [controlMetrics(), controlMetrics()],
-    candidates: two.gate.candidates.map((receipt) => ({
-      candidateId: receipt.candidateId,
-      component: 'system-prompt',
-      operation: 'set-persona-prefix',
-      content: 'You are a coding agent that verifies the failing command before retrying the step.',
-      trial: { valid: true, applicability: 'applied', metrics: goodTrialMetrics({ completion: true, toolFailures: receipt.candidateId === 'high' ? 0 : 1, stepCount: 2, tokenCost: 1000 }) },
-    })),
+    candidates: [
+      { ...personaCandidate('one'), trial: { valid: true, applicability: 'applied', metrics: goodTrialMetrics({ completion: true, toolFailures: 0, stepCount: 2, tokenCost: 1000 }) } },
+      {
+        candidateId: 'two',
+        component: 'tool-guidance',
+        operation: 'set-tool-order',
+        content: '["bash","<unlisted-tools>"]',
+        trial: { valid: true, applicability: 'applied', metrics: goodTrialMetrics({ completion: true, toolFailures: 0, stepCount: 2, tokenCost: 1000 }) },
+      },
+    ],
     maxAppliedEdits: 2,
   })
   assert.equal(twoAllowed.kind, 'apply')
   assert.equal(twoAllowed.appliedCandidateIds.length, 2)
+
+  const unprobed = plugin.evaluateGateV4({
+    controls: [controlMetrics(), controlMetrics()],
+    candidates: [
+      { ...personaCandidate('probed'), probed: true },
+      { ...personaCandidate('unprobed'), probed: false, trial: { valid: false } },
+    ],
+  })
+  assert.equal(unprobed.kind, 'apply')
+  assert.deepEqual(unprobed.appliedCandidateIds, ['probed'])
+  assert.deepEqual(unprobed.gate.candidates.map((receipt) => receipt.candidateId), ['probed'])
+
+  const malformed = plugin.validateGateReceipt({
+    version: 'gate/v4', policy: 'v4', controlCount: 0.5, stable: 'yes',
+    rankWeights: 'nope', tokenGuardRatio: 'nope', candidates: [1, 2],
+    appliedCandidateIds: ['not-a-candidate'], rejectedCandidateIds: [],
+  })
+  assert.ok(malformed.length >= 5)
 })
 
 /* 17b */
@@ -1198,8 +1248,11 @@ test('19. v4 cycle — controls, persona injection, gate receipt, applied branch
     assert.equal(applied.appliedComponents.length, 1)
     assert.equal(applied.appliedComponents[0], 'system-prompt')
     const injected = handles.flatMap((handle) => handle.sections)
-    assert.ok(injected.length >= 2)
+    assert.equal(injected.length, 4, 'two controls + two treatments each register a matched section')
     assert.ok(injected.every((section) => section.name === 'deployment:persona-prefix'))
+    const treatmentTexts = injected.filter((section) => section.text === PERSONA_CONTENT || section.text === PERSONA_CONTENT_2)
+    assert.equal(treatmentTexts.length, 2)
+    assert.equal(injected.filter((section) => section.text.includes('Do nothing')).length, 0)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
@@ -1212,6 +1265,7 @@ test('20. PR-1 packaging/harness pins — new modules packaged, stage0 pinned to
   for (const entry of [
     'lib/admissibility.js', 'lib/admissibility.d.ts',
     'lib/gate-v4.js', 'lib/gate-v4.d.ts',
+    'lib/probe-arm.js', 'lib/probe-arm.d.ts',
   ]) {
     assert.ok(packageJson.files.includes(entry), `package files must include ${entry}`)
   }
@@ -1219,4 +1273,204 @@ test('20. PR-1 packaging/harness pins — new modules packaged, stage0 pinned to
   assert.match(stage0, /gatePolicy:\s*v3/, 'archived Stage-0 harness must pin gatePolicy v3')
   const stage0r6 = await readFile(path.join(packageRoot, '..', '..', 'e2e', 'stage0-r6', 'run.mjs'), 'utf8')
   assert.match(stage0r6, /gatePolicy:\s*v4/, 'live Gate-v4 runner must pin gatePolicy v4')
+})
+
+/* 21 */
+test('21. matched arms — control/treatment prompt+section lengths equal; control hides the edit', () => {
+  const cycleId = 'cycle-matched-1'
+  const content = 'You are a coding agent that checks the failing command and reports the first error before retrying the step.'
+  const input = {
+    taskId: 'task-1',
+    cycleId,
+    baseline: metrics(),
+    replayScope: 'last-failed-step',
+    trajectorySummary: 'tool=bash;code=TOOL_FAILED; command failed',
+    candidate: {
+      candidateId: 'cand-1',
+      candidateType: 'invariant',
+      component: 'system-prompt',
+      operation: 'set-persona-prefix',
+      content,
+    },
+    seed: cycleId,
+  }
+  const treatment = probeArm.buildArmPrompt(input, 'treatment')
+  const control = probeArm.buildArmPrompt(input, 'control')
+  assert.equal(treatment.prompt.length, control.prompt.length)
+  assert.equal(treatment.sectionText.length, control.sectionText.length)
+  assert.ok(treatment.prompt.includes(content))
+  assert.ok(!control.prompt.includes(content))
+  assert.equal(control.sectionText, probeArm.neutralPlaceholder(content.length, cycleId))
+  assert.ok(!control.sectionText.includes('You are a coding agent'))
+  // Different candidate bodies still produce matched arm pairs (placeholder length follows the body).
+  const short = probeArm.buildArmPrompt({ ...input, candidate: { ...input.candidate, content: 'You are a terse agent.' } }, 'treatment')
+  const shortControl = probeArm.buildArmPrompt({ ...input, candidate: { ...input.candidate, content: 'You are a terse agent.' } }, 'control')
+  assert.equal(short.prompt.length, shortControl.prompt.length)
+  assert.equal(short.sectionText.length, shortControl.sectionText.length)
+})
+
+/* 22 */
+test('22. observeOnly v4 — no control children, schema-valid trials, observe-only rejection', { timeout: 30000 }, async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'h2-task-observe-'))
+  try {
+    let created = 0
+    const stub = createStubContext({
+      services: {
+        agentDefaultModel: { currentSelection: () => ({ provider: 'fake', model: 'fake-model' }) },
+        llm: { stream: () => usageStream(personaProposalJson(), 500) },
+        agents: {
+          current: () => ({ applyHarnessPatch: () => {} }),
+          create: async () => { created += 1; return childHandle([{ role: 'assistant', content: [{ type: 'text', text: 'ok' }] }]) },
+        },
+        harness2Experience: { ready: true, queryPriors: () => ({ priors: [], totalMatched: 0 }) },
+      },
+    })
+    plugin.apply(stub.ctx, makeConfig(dir, { observeOnly: true }))
+    const agent = makeAgent('parent-observe')
+    const listener = stub.listeners.get('agent/request-error')
+    const signal = new AbortController().signal
+    for (let index = 0; index < 3; index += 1) {
+      await listener(
+        { agent, turn: 1, step: index + 1, provider: 'fake', failure: { message: 'failed', code: 'E' }, retryPolicy: undefined, signal },
+        async () => undefined,
+      )
+    }
+    await waitFor(async () => {
+      try {
+        const text = await readFile(path.join(dir, 'ledger.jsonl'), 'utf8')
+        return text.trim().split('\n').filter(Boolean).length >= 2
+      } catch { return false }
+    })
+    assert.equal(created, 0, 'observeOnly must not create control/treatment children')
+    const envelopes = (await readFile(path.join(dir, 'ledger.jsonl'), 'utf8'))
+      .trim().split('\n').filter(Boolean).map((line) => JSON.parse(line))
+    assert.equal(envelopes[0].event, 'probe/completed')
+    assert.equal(envelopes[0].payload.controlMetrics, undefined)
+    assert.ok(envelopes[0].payload.trials.every((trial) => trial.valid === false && trial.error === 'observe-only'))
+    assert.equal(envelopes[1].payload.reason, 'observe-only')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+/* 23 */
+test('23. v4 diagnostics — missing systemPrompt and empty transcripts are reported, not silent', { timeout: 30000 }, async () => {
+  const runScenario = async (makeChild) => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'h2-task-diag-'))
+    try {
+      const stub = createStubContext({
+        services: {
+          agentDefaultModel: { currentSelection: () => ({ provider: 'fake', model: 'fake-model' }) },
+          llm: { stream: () => usageStream(personaProposalJson(), 500) },
+          agents: { current: () => ({ applyHarnessPatch: () => {} }), create: async () => makeChild() },
+          harness2Experience: { ready: true, queryPriors: () => ({ priors: [], totalMatched: 0 }) },
+        },
+      })
+      plugin.apply(stub.ctx, makeConfig(dir, { observeOnly: false }))
+      const agent = makeAgent('parent-diag')
+      const listener = stub.listeners.get('agent/request-error')
+      const signal = new AbortController().signal
+      for (let index = 0; index < 3; index += 1) {
+        await listener(
+          { agent, turn: 1, step: index + 1, provider: 'fake', failure: { message: 'failed', code: 'E' }, retryPolicy: undefined, signal },
+          async () => undefined,
+        )
+      }
+      await waitFor(async () => {
+        try {
+          const text = await readFile(path.join(dir, 'ledger.jsonl'), 'utf8')
+          return text.trim().split('\n').filter(Boolean).length >= 2
+        } catch { return false }
+      })
+      const envelopes = (await readFile(path.join(dir, 'ledger.jsonl'), 'utf8'))
+        .trim().split('\n').filter(Boolean).map((line) => JSON.parse(line))
+      return { logs: stub.logs.map(([level, message]) => `${level}:${message}`).join('\n'), envelopes }
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }
+
+  const missing = await runScenario(() => childHandleNoSystemPrompt([{ role: 'assistant', content: [{ type: 'text', text: 'ok' }] }]))
+  assert.match(missing.logs, /persona-injection-unavailable/)
+  assert.equal(missing.envelopes[0].event, 'probe/completed')
+  assert.equal(missing.envelopes[0].payload.controlMetrics, undefined)
+  assert.equal(missing.envelopes[1].event, 'compose/rejected')
+
+  const empty = await runScenario(() => childHandle([]))
+  assert.match(empty.logs, /empty-transcript/)
+  assert.match(empty.logs, /control-failed/)
+  assert.equal(empty.envelopes[0].event, 'probe/completed')
+  assert.equal(empty.envelopes[0].payload.controlMetrics, undefined)
+  assert.equal(empty.envelopes[1].event, 'compose/rejected')
+})
+
+/* 24 */
+test('24. gate receipt ↔ payload consistency + deep validation', () => {
+  const controls = [
+    goodTrialMetrics({ completion: true, toolFailures: 1, stepCount: 2, tokenCost: 1000 }),
+    goodTrialMetrics({ completion: true, toolFailures: 1, stepCount: 2, tokenCost: 1000 }),
+  ]
+  const trial = trialRecord({
+    candidateId: 'a',
+    component: 'system-prompt',
+    operation: 'set-persona-prefix',
+    applicability: 'applied',
+    metrics: goodTrialMetrics({ completion: true, toolFailures: 0, stepCount: 2, tokenCost: 9999 }),
+  })
+  const candidates = [
+    {
+      candidateId: 'a',
+      candidateType: 'invariant',
+      edit: {
+        component: 'system-prompt',
+        operation: 'set-persona-prefix',
+        content: 'You are a coding agent that checks the failing command before retrying.',
+        contentHash: hashOf('You are a coding agent that checks the failing command before retrying.'),
+      },
+    },
+    {
+      candidateId: 'b',
+      candidateType: 'domain',
+      edit: {
+        component: 'system-prompt',
+        operation: 'set-persona-prefix',
+        content: 'You are a coding agent that verifies the failing step before retrying.',
+        contentHash: hashOf('You are a coding agent that verifies the failing step before retrying.'),
+      },
+    },
+  ]
+  const probe = {
+    taskId: 'task-1',
+    cycleId: 'cycle-consistency',
+    baselineMetrics: metrics(),
+    trials: [trial],
+    evidenceSummary: 'failure',
+    controlMetrics: controls,
+  }
+  const decision = plugin.decideCompose({
+    probe,
+    candidates,
+    cycleTokenCost: 10,
+    config: new plugin.Config({ observeOnly: false, gatePolicy: 'v4' }),
+  })
+  assert.equal(decision.kind, 'reject')
+  assert.equal(decision.reason, 'regression')
+  assert.deepEqual(decision.gate.candidates.map((item) => item.candidateId), ['a'], 'receipt only covers probed candidates')
+  assert.deepEqual(decision.gate.rejectedCandidateIds, decision.rejectedCandidateIds)
+  assert.equal(plugin.validateGateReceipt(decision.gate).length, 0)
+  const payload = {
+    taskId: probe.taskId,
+    cycleId: probe.cycleId,
+    reason: decision.reason,
+    rejectedCandidateIds: decision.rejectedCandidateIds,
+    baselineMetrics: probe.baselineMetrics,
+    trials: probe.trials,
+    gate: decision.gate,
+  }
+  assert.deepEqual(plugin.validateComposeRejectedPayload(payload), [])
+  // A mismatch between receipt and payload is rejected by the validator.
+  assert.ok(plugin.validateComposeRejectedPayload({
+    ...payload,
+    gate: { ...decision.gate, rejectedCandidateIds: ['b'] },
+  }).some((error) => error.includes('gate.rejectedCandidateIds')))
 })

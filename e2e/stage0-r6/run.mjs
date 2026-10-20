@@ -225,7 +225,8 @@ async function main() {
   const sessionsWithoutCycle = sessions.filter((session) => session.recordsAdded !== 2)
   const failedSessions = sessions.filter((session) => session.exit !== 0)
   const probeRequests = requestLog.filter((request) => request.kind === 'probe').length
-  const expectedProbeRequests = CYCLES * (MODE === 'positive' ? 4 : 2)
+  // Negative arm: all candidates are non-simulable, so controls are skipped (0 children).
+  const expectedProbeRequests = CYCLES * (MODE === 'positive' ? 4 : 0)
 
   const summary = {
     mode: MODE,
@@ -258,9 +259,7 @@ async function main() {
     ['every session exits 0', failedSessions.length === 0],
     ['every session produced exactly one cycle (2 records)', sessionsWithoutCycle.length === 0],
     ['one distinct cycle per session', cycles.size === CYCLES && probes.length === CYCLES],
-    ['every cycle has exactly 2 recovery controls', badControls.length === 0],
     ['every compose record carries a gate/v4 receipt', gateReceipts.length === CYCLES],
-    ['every gate receipt has controlCount=2 and stable=true', stableGate.length === CYCLES],
     ['probe child requests match the mode', probeRequests === expectedProbeRequests],
   ]
   const modeChecks = MODE === 'negative'
@@ -269,6 +268,10 @@ async function main() {
         ['20 compose/rejected records', rejected.length === CYCLES],
         ['all candidate receipts are inadmissible', inadmissible === CYCLES * 2],
         ['every rejection id exists in the same payload trials', trialIdsValid],
+        ['no control children for non-simulable candidates (controlCount=0)',
+          gateReceipts.every((record) => record.payload.gate.controlCount === 0
+            && record.payload.gate.stable === false)],
+        ['no control metrics emitted', badControls.length === CYCLES],
       ]
     : [
         [`positive-control persona applied in >= 18 cycles (got ${applied.length})`, applied.length >= 18],
@@ -279,6 +282,9 @@ async function main() {
             PERSONAS.some((persona) => persona.contentHash === edit.contentHash)))],
         ['applied receipts show admitted candidates',
           applied.every((record) => record.payload.gate?.candidates.some((item) => item.admitted === true))],
+        ['every applied receipt has controlCount=2 and stable=true',
+          gateReceipts.length === CYCLES && stableGate.length === CYCLES],
+        ['every cycle has exactly 2 recovery-control metrics', badControls.length === 0],
       ]
   const checks = [...baseChecks, ...modeChecks]
   const passed = checks.every(([, ok]) => ok)

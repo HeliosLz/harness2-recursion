@@ -74,16 +74,17 @@ npm run verify                 # 37/37
 npm run stage0:r6              # live Gate-v4 验收（~2 分钟）
 ```
 
-## 6. Interrogate 修复（Act 1–5）
+## 6. PR-1.1 硬化（interrogate Consider 项）
 
-| Act | 问题 | 修复 | 证据 |
-| :-: | :-- | :-- | :-- |
-| 1 | `e2e/stage0` 未 pin v3，默认 v4 会覆盖历史 20/20 证据 | 在 `patchYaml()` 加 `gatePolicy: v3`，`--dump-config` 断言该字段；测试 20 静态校验两个 runner 的 pin | `npm run stage0` 重跑：PASS，NULL/ADV 20/20，v3 复现成立 |
-| 2 | 发布包 `files` 漏 `lib/admissibility.*` / `lib/gate-v4.*` | 加入 `files`；测试 20 校验 | `npm pack --dry-run` 现含 4 个新文件 |
-| 3 | admissibility 原型链查找：`__proto__`/`constructor` 可绕过，component 会抛错 | 改用 `Object.hasOwn` + Array 校验；补继承键测试 | 测试 16：继承键全部拒绝且不抛；`triggerThreshold` 仍通过 |
-| 4 | completion 恒真、regression 漏 completion、空 transcript 有效、applicability 默认 applied | `completion = assistantMessages > 0`；v4 空 transcript trial 置 `valid:false`；control 空 transcript 不产出 metric；`regressed` 加入 completion；`applicability` 缺失即 `unavailable` | 测试 17/17b；live 仍 PASS |
-| 5 | 无 v4 正向路径测试；live 全负向，gate 可“永远拒绝”通过 | 新增测试 19（stub v4 cycle：2 controls + persona 注入 + gate receipt + applied）；新增 live positive 臂 `stage0:r6:positive` | 测试 19 PASS；live negative PASS（0 applied / 20 rejected / 2 controls）；live positive PASS（**20/20 applied**、probe 80 = 4/cycle、gate stable/controlCount 2、每 cycle 恰 1 edit） |
+| 项 | 实现 | 证据 |
+| :-- | :-- | :-- |
+| Matched control arm | `probe-arm.ts` 提供共享 `buildArmPrompt`/`runProbeArm`；control 用 `neutralPlaceholder(len, cycleId)` 替换 edit body，两臂注册同长度 `deployment:persona-prefix` section；treatment/control prompt 长度严格相等 | 测试 21：两臂 prompt/section 长度相等、control 不含 edit 文本；live positive probe 80 仍 PASS |
+| 禁止候选调裁判 | tunable 表只剩 `triggerThreshold/repeatedFailureWindow/cooldownMs/trajectoryWindow`；`controlReplicates` 固定 `Schema.const(2)`；`maxAppliedEdits` 仅 1|2，且第 2 编辑必须不同 component | 测试 16/17：judge/budget 键全部拒绝；3 controls → low-evidence；同 component 只应用 1 个 |
+| Receipt/payload 一致 | receipt 只含 `probed` 候选；`rejectedCandidateIds` 与 payload 完全一致；`validateGateReceipt` exact-key + 嵌套/集合/原因一致性校验 | 测试 24：budget early-stop 下 receipt=payload；malformed receipt 被拒 |
+| 失败诊断与短路 | `onError('control-failed'/'persona-injection-unavailable'/'empty-transcript'/'probe-arm-timeout')`；observeOnly 或无可模拟候选时跳过 control 子智能体；budget 覆盖每个 control/trial | 测试 22/23：observeOnly 零 child；缺失 systemPrompt/空 transcript 有诊断 |
+| normalize/raw | row id 按 raw 校验；toolOrder 名称限制为安全字符；`" session "`/零宽字符不再通过 | 测试 16 |
+| Prompt 承诺 | `PROPOSE_SYSTEM` 改为“shape-valid”，真实 row/tool membership 标记 `TODO(PR-3, composed snapshot)` | 源码 + 设计 §1.3 |
 
-同时加固：`stage0:r6` 断言 session exit、每 session 恰 2 条记录、唯一 cycle、gate `controlCount=2 && stable=true`、probe 请求数；失败报告只写 `artifacts/`，不再覆盖 tracked `RESULTS.md`。
+**行为变化**：负向 `stage0:r6` 的候选全部不可模拟，因此按设计跳过 control 子智能体（`controlCount=0`, `stable=false`）；正向 `stage0:r6:positive` 的 persona 候选仍产生 2 controls + 2 trials/cycle。
 
-**仍未修（review 的 Consider 项，非本次 Act）**：matched control prompt/长度匹配占位、receipt 与 payload 的 rejected 集一致性 + validator 深度、3–4 control 的 mean/stability 一致性、maxAppliedEdits 同 component 语义、judge/budget 键仍可被 `set-harness2-config` 调整、observeOnly 下仍跑 controls、失败诊断日志、persona 注入与沙箱、probe 两次实现/`index.ts` 体量、normalize/raw content。
+**仍未修（真实风险，留在文档）**：persona 注入 × 无工具沙箱（sandbox 上游 TODO）、`index.ts` 与 e2e harness 的重复、probe 双实现已合并为 `runProbeArm` 但 profile/fake-server runner 仍重复、row/tool 真实 membership（PR-3）、`metricWeights` 仍是 v4-dead config。

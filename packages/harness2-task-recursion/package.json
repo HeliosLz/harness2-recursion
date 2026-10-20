@@ -28,7 +28,9 @@
     "lib/admissibility.js",
     "lib/admissibility.d.ts",
     "lib/gate-v4.js",
-    "lib/gate-v4.d.ts"
+    "lib/gate-v4.d.ts",
+    "lib/probe-arm.js",
+    "lib/probe-arm.d.ts"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",

@@ -83,11 +83,7 @@ export const TUNABLE_HARNESS2_KEYS: Readonly<Record<string, readonly [number, nu
   triggerThreshold: [1, 20],
   repeatedFailureWindow: [1, 20],
   cooldownMs: [0, 600_000],
-  probeTimeoutMs: [1_000, 600_000],
-  maxCostPerCycle: [1_000, 10_000_000],
   trajectoryWindow: [1, 20],
-  controlReplicates: [2, 2],
-  maxAppliedEdits: [1, 2],
 })
 
 export const FORBIDDEN_CONFIG_KEYS: readonly string[] = Object.freeze([
@@ -121,9 +117,10 @@ function checkVariables(content: string): AdmissibilityCode | undefined {
 }
 
 function checkRowId(content: string): AdmissibilityCode | undefined {
-  const row = normalize(content)
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(row)) return 'unknown-row'
-  if (FORBIDDEN_ROWS.some((pattern) => pattern.test(row))) return 'unknown-row'
+  // Validate the RAW content: a row id with spaces/zero-width characters must
+  // fail here, not later in the PR-3 renderer.
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(content)) return 'unknown-row'
+  if (FORBIDDEN_ROWS.some((pattern) => pattern.test(content))) return 'unknown-row'
   return undefined
 }
 
@@ -138,6 +135,9 @@ function checkToolOrder(content: string): AdmissibilityCode | undefined {
   const names = value.filter((item): item is string => typeof item === 'string' && item.length > 0)
   if (names.length !== value.length) return 'invalid-tool-order'
   if (new Set(names).size !== names.length) return 'invalid-tool-order'
+  if (names.some((name) => name !== '<unlisted-tools>' && !/^[A-Za-z0-9_.:-]+$/.test(name))) {
+    return 'invalid-tool-order'
+  }
   if (names.filter((name) => name === '<unlisted-tools>').length !== 1) return 'invalid-tool-order'
   return undefined
 }

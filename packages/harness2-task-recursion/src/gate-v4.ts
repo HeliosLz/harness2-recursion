@@ -22,6 +22,8 @@ export interface GateMetrics {
 
 export interface GateCandidateInput {
   readonly candidateId: string
+  /** False = candidate never entered Probe; it must not appear in the receipt. */
+  readonly probed?: boolean
   readonly component: string
   readonly operation: string
   readonly content: string
@@ -131,11 +133,17 @@ export function evaluateGateV4(input: {
   readonly maxAppliedEdits?: number
 }): GateV4Decision {
   const controls = input.controls.filter((metrics) => metrics !== undefined)
-  const stable = stableControls(controls)
-  const controlBar = controls.length > 0 ? meanControl(controls) : undefined
-  const noise = controls.length >= 2 ? controlNoise(controls) : { completion: 0, toolFailures: 1, stepCount: 1 }
+  // PR-1.1: exactly two controls are required. A 3rd/4th replicate would change
+  // the mean without a matching stability check, so it is fail-closed instead.
+  const controlsValid = controls.length === 2
+  const stable = controlsValid && stableControls(controls)
+  const controlBar = controlsValid ? meanControl(controls) : undefined
+  const noise = controlsValid ? controlNoise(controls) : { completion: 0, toolFailures: 1, stepCount: 1 }
 
-  const receipts: GateCandidateReceipt[] = input.candidates.map((candidate) => {
+  // Receipts cover only candidates that actually reached Probe. Unprobed
+  // candidates never get fabricated neutral deltas.
+  const probedCandidates = input.candidates.filter((candidate) => candidate.probed !== false)
+  const receipts: GateCandidateReceipt[] = probedCandidates.map((candidate) => {
     const admissibility = checkAdmissibility(candidate.component, candidate.operation, candidate.content)
     const trial = candidate.trial
     const applicable = trial.valid === true
@@ -201,17 +209,26 @@ export function evaluateGateV4(input: {
   }
 
   const admitted = receipts.filter((receipt) => receipt.admitted)
-  const appliedCandidates = admitted
+  const ranked = admitted
     .slice()
     .sort((left, right) => right.rank - left.rank || left.candidateId.localeCompare(right.candidateId))
-    .slice(0, Math.max(1, Math.min(2, input.maxAppliedEdits ?? 1)))
-    .map((receipt) => receipt.candidateId)
+  const componentOf = (candidateId: string): string =>
+    probedCandidates.find((candidate) => candidate.candidateId === candidateId)?.component ?? ''
+  const appliedCandidateIds: string[] = []
+  for (const receipt of ranked) {
+    if (appliedCandidateIds.length >= Math.max(1, Math.min(2, input.maxAppliedEdits ?? 1))) break
+    if (appliedCandidateIds.length === 1
+      && componentOf(appliedCandidateIds[0]!) === componentOf(receipt.candidateId)) {
+      continue // PR-1.1 v3 parity: a second edit must target a different component.
+    }
+    appliedCandidateIds.push(receipt.candidateId)
+  }
 
   const rejectedCandidateIds = receipts
-    .filter((receipt) => !appliedCandidates.includes(receipt.candidateId))
+    .filter((receipt) => !appliedCandidateIds.includes(receipt.candidateId))
     .map((receipt) => receipt.candidateId)
 
-  if (controls.length < 2 || !stable || controlBar === undefined) {
+  if (!controlsValid || !stable || controlBar === undefined) {
     return {
       kind: 'reject',
       reason: 'low-evidence',
@@ -221,7 +238,7 @@ export function evaluateGateV4(input: {
       gate: { ...baseReceipt, appliedCandidateIds: [], rejectedCandidateIds, reason: 'low-evidence' },
     }
   }
-  if (appliedCandidates.length === 0) {
+  if (appliedCandidateIds.length === 0) {
     const anyInadmissible = receipts.some((receipt) => !receipt.admissible)
     const anyRegression = receipts.some((receipt) => receipt.regressed)
     const reason = anyInadmissible || anyRegression ? 'regression' : 'low-evidence'
@@ -237,10 +254,9 @@ export function evaluateGateV4(input: {
 
   return {
     kind: 'apply',
-    appliedCandidateIds: appliedCandidates,
-    appliedComponents: appliedCandidates.map((candidateId) =>
-      input.candidates.find((candidate) => candidate.candidateId === candidateId)?.component ?? ''),
-    gate: { ...baseReceipt, appliedCandidateIds: appliedCandidates, rejectedCandidateIds },
+    appliedCandidateIds,
+    appliedComponents: appliedCandidateIds.map((candidateId) => componentOf(candidateId)),
+    gate: { ...baseReceipt, appliedCandidateIds, rejectedCandidateIds },
   }
 }
 
