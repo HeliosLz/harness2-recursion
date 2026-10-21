@@ -11,7 +11,7 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import { applyManagedBlock, hashOf, sha256Hex } from '../src/lib.mjs'
-import { buildReport, hashOf as evalHashOf, loadPrereg, loadTasks } from '../../harness2-eval/src/lib.mjs'
+import { buildReport, hashOf as evalHashOf, loadPrereg, loadTasks, reportHash as evalReportHash } from '../../harness2-eval/src/lib.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const APP = path.resolve(HERE, '..')
@@ -72,6 +72,11 @@ async function evaluationReport(ctx, planned, { accept = true } = {}) {
   const preregFile = path.join(repo, 'e2e', 'holdout', 'preregistration.json')
   const { tasks, text } = await loadTasks(tasksFile)
   const prereg = await loadPrereg(preregFile)
+  const realPrereg = { ...prereg, providerClass: 'real' }
+  const realPreregFile = path.join(ctx.dir, 'prereg-real.json')
+  const realTasksFile = path.join(ctx.dir, 'tasks.jsonl')
+  await writeFile(realPreregFile, JSON.stringify(realPrereg, null, 2) + '\n', 'utf8')
+  await writeFile(realTasksFile, text, 'utf8')
   const batch = tasks.filter((task) => task.fold === 0)
   const manifest = JSON.parse(await readFile(path.join(planned.json.dir, 'manifest.json'), 'utf8'))
   const perTask = batch.map((task, index) => {
@@ -87,12 +92,12 @@ async function evaluationReport(ctx, planned, { accept = true } = {}) {
   const report = buildReport({
     batchId: 'batch-f0-test', revisionId: manifest.revId, profile: manifest.profile,
     cycleId: manifest.cycleId, contentHash: manifest.contentHashes[0], planToken: manifest.planToken,
-    prereg, preregHash: evalHashOf(await readFile(preregFile, 'utf8')), tasksHash: evalHashOf(text),
-    perTask, evaluatedAt: new Date().toISOString(),
+    prereg: realPrereg, preregHash: evalHashOf(await readFile(realPreregFile, 'utf8')), tasksHash: evalHashOf(text),
+    perTask, fold: 0, evaluatedAt: new Date().toISOString(),
   })
   const file = path.join(ctx.dir, 'evaluation.json')
   await writeFile(file, `${JSON.stringify(report, null, 2)}\n`, 'utf8')
-  return { file, report }
+  return { file, report, preregFile: realPreregFile, tasksFile: realTasksFile }
 }
 
 async function plan(ctx, extra = []) {
@@ -213,7 +218,7 @@ test('apply: token/preflight/flags enforced; writes patch, backup, active and jo
     assert.equal(forcedWithoutEnv.status, 1)
     assert.equal(forcedWithoutEnv.json.code, 'evaluation-force-env-required')
     const evaluation = await evaluationReport(ctx, planned)
-    const applied = await run(['apply', '--home', ctx.home, '--rev', planned.json.revId, '--token', planned.json.planToken, '--evaluation', evaluation.file, '--yes'])
+    const applied = await run(['apply', '--home', ctx.home, '--rev', planned.json.revId, '--token', planned.json.planToken, '--evaluation', evaluation.file, '--prereg', evaluation.preregFile, '--tasks', evaluation.tasksFile, '--yes'])
     assert.equal(applied.status, 0, applied.stderr)
     assert.equal(applied.json.reload, 'restart-required')
     assert.equal(applied.json.evaluation, 'accept')
@@ -250,7 +255,7 @@ test('rollback: modified patch requires --force; desktop profile is refused', as
     const planned = await plan(ctx)
     await run(['preflight', '--home', ctx.home, '--rev', planned.json.revId, '--cli', FAKE_CLI])
     const evaluation = await evaluationReport(ctx, planned)
-    await run(['apply', '--home', ctx.home, '--rev', planned.json.revId, '--token', planned.json.planToken, '--evaluation', evaluation.file, '--yes'])
+    await run(['apply', '--home', ctx.home, '--rev', planned.json.revId, '--token', planned.json.planToken, '--evaluation', evaluation.file, '--prereg', evaluation.preregFile, '--tasks', evaluation.tasksFile, '--yes'])
     await writeFile(path.join(ctx.profileDir, 'cordis.patch.yml'), '# externally changed\n[]\n', 'utf8')
     const refused = await run(['rollback', '--home', ctx.home, '--rev', planned.json.revId])
     assert.equal(refused.status, 1)
@@ -287,7 +292,7 @@ test('apply: evaluation report required; reject/mismatch/forced-escape hatch enf
     await run(['preflight', '--home', ctx.home, '--rev', planned.json.revId, '--cli', FAKE_CLI])
     // reject verdict is refused
     const rejectedReport = await evaluationReport(ctx, planned, { accept: false })
-    const rejected = await run(['apply', '--home', ctx.home, '--rev', planned.json.revId, '--token', planned.json.planToken, '--evaluation', rejectedReport.file, '--yes'])
+    const rejected = await run(['apply', '--home', ctx.home, '--rev', planned.json.revId, '--token', planned.json.planToken, '--evaluation', rejectedReport.file, '--prereg', rejectedReport.preregFile, '--tasks', rejectedReport.tasksFile, '--yes'])
     assert.equal(rejected.status, 1)
     assert.equal(rejected.json.code, 'evaluation-rejected')
     // report with the wrong revision is refused
@@ -295,9 +300,9 @@ test('apply: evaluation report required; reject/mismatch/forced-escape hatch enf
     const tampered = { ...good.report, revisionId: 'rev-000000000000' }
     const tamperedFile = path.join(ctx.dir, 'tampered-eval.json')
     await writeFile(tamperedFile, JSON.stringify(tampered), 'utf8')
-    const mismatch = await run(['apply', '--home', ctx.home, '--rev', planned.json.revId, '--token', planned.json.planToken, '--evaluation', tamperedFile, '--yes'])
+    const mismatch = await run(['apply', '--home', ctx.home, '--rev', planned.json.revId, '--token', planned.json.planToken, '--evaluation', tamperedFile, '--prereg', good.preregFile, '--tasks', good.tasksFile, '--yes'])
     assert.equal(mismatch.status, 1)
-    assert.equal(mismatch.json.code, 'evaluation-mismatch')
+    assert.equal(mismatch.json.code, 'evaluation-invalid')
     // forced escape hatch requires the env var and records forced-unevaluated
     const forced = await run(['apply', '--home', ctx.home, '--rev', planned.json.revId, '--token', planned.json.planToken, '--allow-unevaluated', '--yes'], { HARNESS2_ALLOW_UNEVALUATED: '1' })
     assert.equal(forced.status, 0, forced.stderr)
@@ -305,5 +310,59 @@ test('apply: evaluation report required; reject/mismatch/forced-escape hatch enf
     const journal = (await readFile(path.join(ctx.home, 'apply', 'journal.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse)
     assert.equal(journal.at(-1).evaluation, 'forced-unevaluated')
     assert.equal(journal.at(-1).verdict, 'forced-unevaluated')
+  } finally { await rm(ctx.dir, { recursive: true, force: true }) }
+})
+
+
+test('evaluation forgery: accept with forged stats/fold/provider/fields is rejected', async () => {
+  const ctx = await setup()
+  try {
+    const planned = await plan(ctx)
+    await run(['preflight', '--home', ctx.home, '--rev', planned.json.revId, '--cli', FAKE_CLI])
+    const good = await evaluationReport(ctx, planned)
+    const writeReport = async (report, name) => {
+      const file = path.join(ctx.dir, name)
+      report.reportHash = evalReportHash(report)
+      await writeFile(file, JSON.stringify(report), 'utf8')
+      return file
+    }
+    const applyWith = (file) => run(['apply', '--home', ctx.home, '--rev', planned.json.revId,
+      '--token', planned.json.planToken, '--evaluation', file,
+      '--prereg', good.preregFile, '--tasks', good.tasksFile, '--yes'])
+
+    const n1 = { ...good.report, perTask: good.report.perTask.slice(0, 1), N: 1, b: 1, c: 0, delta: 1, p: 0.5, verdict: 'accept' }
+    const n1Result = await applyWith(await writeReport(n1, 'forged-n1.json'))
+    assert.equal(n1Result.status, 1)
+    assert.equal(n1Result.json.code, 'evaluation-invalid')
+
+    const badB = { ...good.report, b: 11 }
+    assert.equal((await applyWith(await writeReport(badB, 'forged-b.json'))).status, 1)
+
+    const badP = { ...good.report, p: 0.0001 }
+    assert.equal((await applyWith(await writeReport(badP, 'forged-p.json'))).status, 1)
+
+    const wrongTask = { ...good.report, perTask: good.report.perTask.map((task, index) => index === 0 ? { ...task, taskId: 'not-a-holdout-task' } : task) }
+    const wrongTaskResult = await applyWith(await writeReport(wrongTask, 'forged-task.json'))
+    assert.equal(wrongTaskResult.status, 1)
+    assert.equal(wrongTaskResult.json.code, 'evaluation-mismatch')
+
+    const extraField = { ...good.report, forged: true }
+    assert.equal((await applyWith(await writeReport(extraField, 'forged-extra.json'))).status, 1)
+
+    const fakeProvider = { ...good.report, providerClass: 'fake-calibration' }
+    const fakeResult = await applyWith(await writeReport(fakeProvider, 'forged-fake.json'))
+    assert.equal(fakeResult.status, 1)
+    assert.equal(fakeResult.json.code, 'evaluation-fake-provider')
+
+    const badSecondary = { ...good.report, secondary: { ...good.report.secondary, medianToolFailuresT: 99 } }
+    assert.equal((await applyWith(await writeReport(badSecondary, 'forged-secondary.json'))).status, 1)
+
+    const wrongFold = { ...good.report, fold: 99 }
+    assert.equal((await applyWith(await writeReport(wrongFold, 'forged-fold.json'))).status, 1)
+
+    // Unmodified real-provider report still applies.
+    const ok = await applyWith(good.file)
+    assert.equal(ok.status, 0, ok.stderr)
+    assert.equal(ok.json.evaluation, 'accept')
   } finally { await rm(ctx.dir, { recursive: true, force: true }) }
 })

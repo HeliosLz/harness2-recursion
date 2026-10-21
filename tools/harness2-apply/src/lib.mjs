@@ -16,6 +16,10 @@ import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import YAML from 'yaml'
+import {
+  loadPrereg, loadTasks, reportHash as verifyReportHash,
+  validateFoldTaskSet, validatePrereg, validateReport,
+} from '../../harness2-eval/src/verify.mjs'
 
 export const APPLY_SCHEMA = 'harness2-apply/v1'
 export const EDIT_SCHEMA = 'harness2-edit/v1'
@@ -577,18 +581,6 @@ export async function verifyRevision(options) {
 
 /* ── apply / rollback / status ───────────────────────────────────────────── */
 
-function stableStringify(value) {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value)
-  if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(',')}]`
-  const keys = Object.keys(value).sort()
-  return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`
-}
-
-function evalReportHash(report) {
-  const { reportHash: _ignored, ...rest } = report
-  return hashOf(stableStringify(rest))
-}
-
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
 const DEFAULT_EVAL_PREREG = path.join(REPO_ROOT, 'e2e', 'holdout', 'preregistration.json')
 const DEFAULT_EVAL_TASKS = path.join(REPO_ROOT, 'e2e', 'holdout', 'tasks.jsonl')
@@ -600,21 +592,42 @@ export async function validateEvaluationReport(reportFile, manifest, options = {
     throw new ApplyError('evaluation-invalid', `cannot read evaluation report: ${error.message}`)
   }
   if (report?.schema !== 'harness2-eval/v1') throw new ApplyError('evaluation-invalid', 'report schema must be harness2-eval/v1')
+  // fake-calibration reports are tooling calibration, never efficacy evidence.
+  if (report.providerClass !== 'real') throw new ApplyError('evaluation-fake-provider', 'production apply requires providerClass: real')
+  const preregFile = options.preregFile ?? DEFAULT_EVAL_PREREG
+  const tasksFile = options.tasksFile ?? DEFAULT_EVAL_TASKS
+  let prereg
+  let loadedTasks
+  try { prereg = await loadPrereg(preregFile) } catch (error) { throw new ApplyError('evaluation-invalid', `invalid preregistration: ${error.message}`) }
+  let tasksText
+  try { loadedTasks = await loadTasks(tasksFile); tasksText = loadedTasks.text } catch (error) { throw new ApplyError('evaluation-invalid', `invalid tasks: ${error.message}`) }
+  const tasksHash = hashOf(tasksText)
+  const preregHash = hashOf(await readFile(preregFile, 'utf8'))
+  try {
+    validatePrereg({ prereg, tasks: loadedTasks, tasksHash, fold: report.fold })
+  } catch (error) {
+    throw new ApplyError('evaluation-invalid', `preregistration check failed: ${error.message}`)
+  }
+  const errors = validateReport(report, { prereg, tasksHash, preregHash })
+  if (errors.length > 0) throw new ApplyError('evaluation-invalid', errors.join('; '))
+  if (!validateFoldTaskSet(report, prereg, loadedTasks)) {
+    throw new ApplyError('evaluation-mismatch', 'report task ids do not match the registered fold exactly')
+  }
+  // Independent recomputation evidence: validateReport already compared every
+  // statistic and verdict against evaluateVerdict; re-check the hash explicitly.
+  if (report.reportHash !== verifyReportHash(report)) throw new ApplyError('evaluation-invalid', 'reportHash does not match report content')
   if (report.verdict !== 'accept') throw new ApplyError('evaluation-rejected', `evaluation verdict is ${String(report.verdict)}; only accept may apply`)
   if (report.revisionId !== manifest.revId) throw new ApplyError('evaluation-mismatch', 'evaluation revisionId does not match manifest')
   if (report.planToken !== manifest.planToken) throw new ApplyError('evaluation-mismatch', 'evaluation planToken does not match manifest')
   if (!manifest.contentHashes.includes(report.contentHash)) throw new ApplyError('evaluation-mismatch', 'evaluation contentHash does not match manifest')
-  if (report.reportHash !== evalReportHash(report)) throw new ApplyError('evaluation-invalid', 'reportHash does not match report content')
   for (const key of ['batchId', 'preregHash', 'tasksHash']) {
     if (typeof report[key] !== 'string' || report[key].length === 0) throw new ApplyError('evaluation-invalid', `report missing ${key}`)
   }
-  const preregFile = options.preregFile ?? DEFAULT_EVAL_PREREG
-  const tasksFile = options.tasksFile ?? DEFAULT_EVAL_TASKS
-  const [preregHash, tasksHash] = await Promise.all([hashOf(await readFile(preregFile, 'utf8')), hashOf(await readFile(tasksFile, 'utf8'))])
   if (report.preregHash !== preregHash) throw new ApplyError('evaluation-mismatch', 'preregHash does not match the registered preregistration')
   if (report.tasksHash !== tasksHash) throw new ApplyError('evaluation-mismatch', 'tasksHash does not match the holdout tasks file')
   return report
 }
+
 
 export async function applyRevision(options) {
   const { dshHome, editsDir, revId, token, yes = false, allowUnevaluated = false, evaluation, cliPath } = options

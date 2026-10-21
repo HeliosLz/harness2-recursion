@@ -316,3 +316,12 @@ Gate-v4 的 `compose/rejected.rejectedCandidateIds` 为 **audit-complete**：列
 - `--allow-unevaluated` 废弃为调试逃生口：需 `HARNESS2_ALLOW_UNEVALUATED=1`，记录 `evaluation:'forced-unevaluated'`；默认路径必须要求 evaluation。
 - preflight 不要求 evaluation；仍拒绝 desktop；不改 ledger v3/bus/`AppliedEdit`/confidence/Gate-v4。
 - 边界：fake-provider 仅为 `fake-calibration` 工具校准，不作为真实效能证据；真实 provider 由操作者运行。
+
+## 14. PR-4.1（Gate-B 评估强制加固）
+
+- 共享验证面 `tools/harness2-eval/src/verify.mjs`：`loadPrereg/loadTasks/validatePrereg/evaluateVerdict/buildReport/validateReport/reportHash/validateFoldTaskSet`；eval 与 applier 同一实现。
+- report `harness2-eval/v1` 必填：`providerClass`（`fake-calibration|real`，与 prereg 一致）和 `fold`；perTask 四臂 C/R/I/T 完整且数值字段有效；顶层字段集合精确（额外字段拒绝）。
+- applier 独立重算：读取当前 prereg/tasks（hash 必须等于 report 字段），校验 fold/N/taskId 集合；从 perTask+prereg 重算 b/c/N/delta/p/secondary/drift/inert/mount 并要求与报告逐项相等；`reportHash` 自校验；`verdict` 必须等于重算值且为 accept；revisionId/planToken/contentHash 与 manifest 匹配。任何不一致 → `evaluation-invalid` / `evaluation-mismatch`。
+- **生产 apply 只接受 `providerClass:'real'`**；fake-calibration 报告 → `evaluation-fake-provider`。fake 只做工具校准；端到端 fake 测试仅通过 `--allow-unevaluated` + `HARNESS2_ALLOW_UNEVALUATED=1` 调试逃生口，journal/active/manifest 记录 `forced-unevaluated`。
+- **NULL/inert 语义（次选）**：PR-4.1 不增加第五臂；I 臂是 shape-matched inert/NULL proxy。报告字段为 `inertControlRejected` 与 `nullProxyRejected`，两者均要求 I 数据完整；I 缺失/超时 → `inconclusive`，不得用缺失数据满足负向控制；I 完整且被接受 → 两字段 false。CONTRACT 不接受 `nullRevisionRejected = inertRejected` 的旧语义。
+- `pr3:integration` 继续通过强制调试路径验证 applier 回归；`pr4:integration` 验证 fake 拒绝 + debug 路径标记。

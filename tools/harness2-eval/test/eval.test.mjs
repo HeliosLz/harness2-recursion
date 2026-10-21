@@ -43,7 +43,7 @@ test('statistics: paired b/c/delta and exact one-sided McNemar boundaries', () =
   assert.ok(Math.abs(exactMcNemarOneSided(10, 0) - 0.0009765625) < 1e-12)
   assert.ok(exactMcNemarOneSided(0, 10) > 0.99)
 
-  const baseArm = { success: false, toolFailures: 0, stepCount: 1, tokenCost: 1000 }
+  const baseArm = { success: false, toolFailures: 0, stepCount: 1, tokenCost: 1000, durationMs: 5, mountFailed: false, schemaFailed: false }
   const goodArm = { ...baseArm, success: true }
   const perTask = Array.from({ length: 12 }, (_, index) => ({
     taskId: `t${index}`,
@@ -56,7 +56,8 @@ test('statistics: paired b/c/delta and exact one-sided McNemar boundaries', () =
   assert.equal(stats.delta, 1)
   assert.ok(stats.p < 0.05)
   assert.equal(stats.verdict, 'accept')
-  assert.equal(stats.nullRevisionRejected, true)
+  assert.equal(stats.inertControlRejected, true)
+  assert.equal(stats.nullProxyRejected, true)
 })
 
 test('statistics: inert/null accepted or incomplete data cannot be accepted', async () => {
@@ -65,18 +66,19 @@ test('statistics: inert/null accepted or incomplete data cannot be accepted', as
   const inertAccepted = batch.map((task) => ({
     taskId: task.id,
     arms: {
-      C: { success: false, toolFailures: 0, tokenCost: 1000 },
-      R: { success: false, toolFailures: 0, tokenCost: 1000 },
-      I: { success: true, toolFailures: 0, tokenCost: 1000 },
-      T: { success: true, toolFailures: 0, tokenCost: 1000 },
+      C: { success: false, toolFailures: 0, stepCount: 1, tokenCost: 1000, durationMs: 5, mountFailed: false, schemaFailed: false },
+      R: { success: false, toolFailures: 0, stepCount: 1, tokenCost: 1000, durationMs: 5, mountFailed: false, schemaFailed: false },
+      I: { success: true, toolFailures: 0, stepCount: 1, tokenCost: 1000, durationMs: 5, mountFailed: false, schemaFailed: false },
+      T: { success: true, toolFailures: 0, stepCount: 1, tokenCost: 1000, durationMs: 5, mountFailed: false, schemaFailed: false },
     },
   }))
   const stats = evaluateVerdict({ perTask: inertAccepted, prereg })
   assert.equal(stats.inert.accepted, true)
-  assert.equal(stats.nullRevisionRejected, false)
+  assert.equal(stats.inertControlRejected, false)
+  assert.equal(stats.nullProxyRejected, false)
   assert.equal(stats.verdict, 'reject')
 
-  const incomplete = inertAccepted.slice(0, 5).map((task) => ({ ...task, arms: { ...task.arms, I: { success: false } } }))
+  const incomplete = inertAccepted.slice(0, 5).map((task) => ({ ...task, arms: { ...task.arms, I: { success: false, toolFailures: 0, stepCount: 1, tokenCost: 1000, durationMs: 5, mountFailed: false, schemaFailed: false } } }))
   assert.equal(evaluateVerdict({ perTask: incomplete, prereg }).verdict, 'inconclusive')
 })
 
@@ -135,7 +137,8 @@ test('report: accept matrix, schema/reportHash, inert and null checks', async ()
   })
   assert.equal(inert.report.verdict, 'reject')
   assert.equal(inert.report.inert.accepted, true)
-  assert.equal(inert.report.nullRevisionRejected, false)
+  assert.equal(inert.report.inertControlRejected, false)
+  assert.equal(inert.report.nullProxyRejected, false)
 })
 
 test('inert patch: same shape, neutral string values, still parses', () => {

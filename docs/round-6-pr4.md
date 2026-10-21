@@ -47,3 +47,14 @@
 - `I` 臂同时承担“inert tool negative”和“NULL revision”检查（报告 `inert.accepted` / `nullRevisionRejected`），避免额外五臂；文档明确此映射。
 - `--allow-unevaluated` 仅为 PR-4 前/调试逃生口；生产路径必须 `--evaluation` accept + preflight + `--yes`。
 - 未实现 PR-5 meta 学习迁移；未改 ledger v3/bus/`AppliedEdit`/confidence/Gate-v4。
+
+## 6. PR-4.1 修复记录（critical 绕过）
+
+adversarial 复核发现 applier 只校验报告字段/hash、不重算统计：N=1 的伪造 accept、改 b/c/p、fake-calibration accept 均可通过。PR-4.1 修复：
+
+- 新增共享验证面 `tools/harness2-eval/src/verify.mjs`（loadPrereg/loadTasks/validatePrereg/evaluateVerdict/buildReport/validateReport/reportHash/validateFoldTaskSet），`harness2-eval` 与 `harness2-apply` 共用，消除漂移。
+- applier `validateEvaluationReport` 现在：读取并校验 prereg（schema/ruleVersion/arms/folds/N/providerClass）；读取 tasks 并核对 hash；报告必须带 `fold` 且 taskId 集合恰好等于注册 fold；perTask 长度 = N、每 task 四臂齐全且字段类型有效；**从 perTask+prereg 重算全部统计**（b/c/N/delta/p/secondary/drift/inert/mount）并与报告逐项一致；`reportHash` 自校验；`verdict` 必须等于重算值且为 accept；report 字段集合必须精确（禁止额外字段）；revisionId/planToken/contentHash 与 manifest 匹配。伪造 N=1/改 b/改 p/换 taskId/改 secondary/自洽 reportHash 但统计不符/额外字段均被拒绝（`verify:apply` 9/9 覆盖）。
+- **providerClass 强制**：report 增加必填 `providerClass`（写入 reportHash），与 prereg 一致；**生产 apply 只接受 `real`**，fake-calibration → `evaluation-fake-provider`。fake 端到端仅能走 `--allow-unevaluated` + `HARNESS2_ALLOW_UNEVALUATED=1` 调试路径，journal/active 标 `forced-unevaluated`。
+- **NULL/inert 语义**：选择“次选”方案（不改臂数）：I 臂是 shape-matched inert/NULL proxy，**不是独立 N 臂**；报告字段改为 `inertControlRejected` 与 `nullProxyRejected`，两者都要求 I 臂数据完整；数据缺失/超时时 verdict 为 `inconclusive`，不得用缺失数据满足负向控制。I 完整且被接受 → 两字段 false → reject；I 完整且被拒绝 → 通过。文档/CONTRACT 明确此选择理由（避免为单一检查引入第五臂与额外运行成本，PR-5 前保持四臂冻结）。
+- `pr4:integration` 新语义：fake-calibration 报告 → apply 拒绝；debug env 路径 apply/rollback PASS 且 journal 标 forced-unevaluated；真实 provider 由操作者另跑（不要求 CI）。
+- 测试计数：`verify:apply` **9/9**、`verify:eval` **6/6**、`verify` **50/50** 不变；`pr3:integration` 仍 PASS。

@@ -65,7 +65,7 @@ npm install
 npm run build        # lib/index.js + lib/index.d.ts + lib/constants.js
 npm run typecheck
 npm run verify       # task 31 + meta 14 + loader smoke 5 = 50 项
-npm run verify:apply # PR-3/PR-4 applier tests（8 项）
+npm run verify:apply # PR-3/PR-4/4.1 applier tests（9 项）
 npm run verify:eval  # PR-4 Gate-B eval tests（6 项）
 npm run pr3:integration  # 可选：真实 CLI 的 isolated profile apply/rollback 集成
 npm run pr4:integration  # 合成四臂 eval → applier apply(--evaluation) → rollback

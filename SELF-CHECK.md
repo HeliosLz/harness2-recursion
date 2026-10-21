@@ -121,3 +121,10 @@ Sessions: 2 (exit 0, final answer printed)
 - applier `apply --evaluation` 强制 accept 报告并校验 revision/hash/planToken/prereg/tasks；journal/active/manifest 记录 evaluation。
 - `--allow-unevaluated` 仅 debug：需 `HARNESS2_ALLOW_UNEVALUATED=1`，记录 forced-unevaluated。
 - 测试：`verify:eval` **6/6**、`verify:apply` **8/8**、`verify` **50/50**；`pr4:integration` 合成矩阵 PASS；真实 provider 边界见 `docs/round-6-pr4.md`。
+
+## 十一、Round-6 PR-4.1（评估强制加固，2026-10-21）
+
+- 共享 verify 模块（eval/applier 同一统计与校验）；applier 独立重算 b/c/N/delta/p/secondary/drift/inert、校验 fold/N/task 集合、reportHash、额外字段；伪造 accept 全部拒绝。
+- providerClass 必填且与 prereg 一致；生产 apply 只接受 real；fake → `evaluation-fake-provider`；debug 仅 `--allow-unevaluated` + `HARNESS2_ALLOW_UNEVALUATED=1`，记录 forced-unevaluated。
+- NULL/inert 语义：I 为 NULL proxy（非独立 N 臂），`inertControlRejected` 与 `nullProxyRejected` 分开计算且要求 I 数据完整；缺失数据 → inconclusive。
+- 测试：verify:apply **9/9**、verify:eval **6/6**、verify **50/50**；pr4 integration fake 拒绝 + debug PASS；pr3 integration PASS。

@@ -152,6 +152,24 @@ function armAcceptance(perTask, prereg, arm) {
   }
 }
 
+function isArmDataComplete(perTask, prereg) {
+  if (perTask.length !== prereg.n) return false
+  for (const task of perTask) {
+    for (const arm of ARMS) {
+      const result = task?.arms?.[arm]
+      if (result === null || typeof result !== 'object') return false
+      if (typeof result.success !== 'boolean') return false
+      for (const key of ['toolFailures', 'stepCount', 'tokenCost', 'durationMs']) {
+        if (typeof result[key] !== 'number' || !Number.isFinite(result[key])) return false
+      }
+      for (const key of ['mountFailed', 'schemaFailed']) {
+        if (typeof result[key] !== 'boolean') return false
+      }
+    }
+  }
+  return true
+}
+
 /**
  * Compute the pre-registered verdict from per-task C/R/I/T results.
  * A `null` revision is operationalized as the inert I arm (shape-matched,
@@ -174,18 +192,22 @@ export function evaluateVerdict({ perTask, prereg }) {
     if (task.arms.C.success !== task.arms.R.success) driftDiff += 1
   }
   const driftChecks = driftDiff <= prereg.rules.maxDriftDiff
-  const inertRejected = !Object.values(inert.checks).every(Boolean)
-  const hasCompleteData = perTask.length === prereg.n
-  const accept = hasCompleteData && treatment.checks.effect
+  const dataComplete = isArmDataComplete(perTask, prereg)
+  const inertAccepted = Object.values(inert.checks).every(Boolean)
+  const inertControlRejected = dataComplete && !inertAccepted
+  // I is a shape-matched inert/NULL proxy; it is not an independent N arm.
+  const nullProxyRejected = dataComplete && !inertAccepted
+  const accept = dataComplete && treatment.checks.effect
     && treatment.checks.significance
     && treatment.checks.toolFailures
     && treatment.checks.tokenCost
     && mountSchemaFailures === 0
     && driftChecks
-    && inertRejected
+    && inertControlRejected
+    && nullProxyRejected
     && prereg.rules.inertMustBeRejected !== false
     && prereg.rules.nullRevisionMustBeRejected !== false
-  const verdict = accept ? 'accept' : (hasCompleteData ? 'reject' : 'inconclusive')
+  const verdict = accept ? 'accept' : (dataComplete ? 'reject' : 'inconclusive')
   return {
     b: treatment.better, c: treatment.worse, N: n,
     delta: treatment.delta, p: treatment.p,
@@ -196,8 +218,9 @@ export function evaluateVerdict({ perTask, prereg }) {
       medianTokenCostT: treatment.tokenCostTreat,
     },
     drift: { diff: driftDiff, threshold: prereg.rules.maxDriftDiff, ok: driftChecks },
-    inert: { accepted: !inertRejected, delta: inert.delta, p: inert.p },
-    nullRevisionRejected: inertRejected,
+    inert: { accepted: inertAccepted, delta: inert.delta, p: inert.p },
+    inertControlRejected,
+    nullProxyRejected,
     mountSchemaFailures,
     verdict,
   }
@@ -205,37 +228,100 @@ export function evaluateVerdict({ perTask, prereg }) {
 
 export function buildReport({
   batchId, revisionId, profile, cycleId, contentHash, planToken,
-  prereg, preregHash, tasksHash, perTask, evaluatedAt = new Date().toISOString(),
+  prereg, preregHash, tasksHash, perTask, fold, evaluatedAt = new Date().toISOString(),
 }) {
   const stats = evaluateVerdict({ perTask, prereg })
   const report = {
     schema: EVAL_SCHEMA,
     batchId, revisionId, profile, cycleId, contentHash, planToken,
     preregHash, tasksHash, evaluatedAt,
+    providerClass: prereg.providerClass,
+    fold: fold ?? prereg.folds?.[0],
     arms: [...ARMS], perTask, ...stats,
   }
   report.reportHash = reportHash(report)
   return report
 }
 
+export const REPORT_KEYS = Object.freeze([
+  'schema', 'batchId', 'revisionId', 'profile', 'cycleId', 'contentHash', 'planToken',
+  'preregHash', 'tasksHash', 'evaluatedAt', 'providerClass', 'fold', 'arms', 'perTask',
+  'b', 'c', 'N', 'delta', 'p', 'secondary', 'drift', 'inert', 'inertControlRejected',
+  'nullProxyRejected', 'mountSchemaFailures', 'verdict', 'reportHash',
+])
+const ARM_RESULT_KEYS = ['success', 'toolFailures', 'stepCount', 'tokenCost', 'durationMs', 'mountFailed', 'schemaFailed']
+
 export function validateReport(report, { prereg, tasksHash, preregHash } = {}) {
   const errors = []
-  if (report?.schema !== EVAL_SCHEMA) errors.push('schema must be harness2-eval/v1')
-  for (const key of ['batchId', 'revisionId', 'profile', 'cycleId', 'contentHash', 'planToken', 'preregHash', 'tasksHash', 'perTask', 'verdict', 'reportHash', 'delta', 'p', 'b', 'c', 'N']) {
-    if (report?.[key] === undefined) errors.push(`report missing ${key}`)
+  if (report === null || typeof report !== 'object' || Array.isArray(report)) return ['report must be an object']
+  const keys = Object.keys(report)
+  if (keys.length !== REPORT_KEYS.length || REPORT_KEYS.some((key) => !Object.hasOwn(report, key))) {
+    errors.push('report has an unexpected field set')
   }
-  if (report?.verdict !== 'accept' && report?.verdict !== 'reject' && report?.verdict !== 'inconclusive') {
-    errors.push('verdict must be accept | reject | inconclusive')
+  if (report.schema !== EVAL_SCHEMA) errors.push('schema must be harness2-eval/v1')
+  if (report.providerClass !== 'fake-calibration' && report.providerClass !== 'real') {
+    errors.push('providerClass must be fake-calibration | real')
   }
-  if (prereg !== undefined && report !== undefined) {
-    const recomputed = evaluateVerdict({ perTask: report.perTask, prereg })
-    if (recomputed.verdict !== report.verdict) errors.push('report verdict does not match recomputed statistics')
-    if (report.delta !== recomputed.delta || report.p !== recomputed.p) errors.push('report delta/p do not match recomputation')
+  if (!Array.isArray(report.perTask) || report.perTask.length === 0) errors.push('perTask must be a non-empty array')
+  if (Array.isArray(report.perTask)) {
+    for (const task of report.perTask) {
+      if (task === null || typeof task !== 'object') { errors.push('perTask entry must be an object'); break }
+      if (Object.keys(task).length !== 2 || task.taskId === undefined || task.arms === undefined) {
+        errors.push('perTask entries must contain exactly taskId + arms'); break
+      }
+      if (task.arms === null || typeof task.arms !== 'object' || Object.keys(task.arms).length !== ARMS.length) {
+        errors.push(`task ${task.taskId} must have exactly C/R/I/T arms`); break
+      }
+      for (const arm of ARMS) {
+        const result = task.arms[arm]
+        if (result === null || typeof result !== 'object' || Object.keys(result).length !== ARM_RESULT_KEYS.length) {
+          errors.push(`task ${task.taskId} arm ${arm} has an unexpected field set`); break
+        }
+        for (const key of ARM_RESULT_KEYS) {
+          if (!Object.hasOwn(result, key)) errors.push(`task ${task.taskId} arm ${arm} missing ${key}`)
+        }
+        if (typeof result.success !== 'boolean') errors.push(`task ${task.taskId} arm ${arm} success must be boolean`)
+        for (const key of ['toolFailures', 'stepCount', 'tokenCost', 'durationMs']) {
+          if (typeof result[key] !== 'number' || !Number.isFinite(result[key])) errors.push(`task ${task.taskId} arm ${arm} ${key} must be finite`)
+        }
+        for (const key of ['mountFailed', 'schemaFailed']) {
+          if (typeof result[key] !== 'boolean') errors.push(`task ${task.taskId} arm ${arm} ${key} must be boolean`)
+        }
+      }
+    }
   }
-  if (tasksHash !== undefined && report?.tasksHash !== tasksHash) errors.push('report tasksHash does not match tasks file')
-  if (preregHash !== undefined && report?.preregHash !== preregHash) errors.push('report preregHash does not match preregistration file')
-  if (report !== undefined && report.reportHash !== reportHash(report)) errors.push('reportHash does not match report content')
+  if (prereg !== undefined && Array.isArray(report.perTask)) {
+    if (report.providerClass !== prereg.providerClass) errors.push('report providerClass does not match preregistration')
+    if (!Array.isArray(prereg.folds) || !prereg.folds.includes(report.fold)) errors.push('report fold is not registered')
+    const foldSet = new Set(prereg.tasksHash === undefined ? [] : [])
+    void foldSet
+    let recomputed
+    try { recomputed = evaluateVerdict({ perTask: report.perTask, prereg }) } catch (error) {
+      errors.push(`cannot recompute statistics: ${error.message}`)
+    }
+    if (recomputed !== undefined) {
+      for (const key of ['b', 'c', 'N', 'delta', 'p', 'secondary', 'drift', 'inert', 'inertControlRejected', 'nullProxyRejected', 'mountSchemaFailures', 'verdict']) {
+        if (stableStringify(report[key]) !== stableStringify(recomputed[key])) {
+          errors.push(`report ${key} does not match recomputed statistics`)
+        }
+      }
+    }
+  }
+  if (tasksHash !== undefined && report.tasksHash !== tasksHash) errors.push('report tasksHash does not match tasks file')
+  if (preregHash !== undefined && report.preregHash !== preregHash) errors.push('report preregHash does not match preregistration file')
+  if (report.reportHash !== reportHash(report)) errors.push('reportHash does not match report content')
   return errors
+}
+
+/** Validate the exact fold task-id set (applier-side independent check). */
+export function validateFoldTaskSet(report, prereg, tasks) {
+  const fold = report.fold
+  if (!Array.isArray(prereg.folds) || !prereg.folds.includes(fold)) return false
+  const expected = new Set(tasks.tasks.filter((task) => task.fold === fold).map((task) => task.id))
+  const actual = new Set(report.perTask.map((task) => task.taskId))
+  if (expected.size !== actual.size) return false
+  for (const id of expected) if (!actual.has(id)) return false
+  return true
 }
 
 export async function replayReport({ reportFile, tasksFile, preregFile }) {
@@ -357,7 +443,7 @@ export async function runBatch({
   return {
     report: buildReport({
       batchId, revisionId, profile, cycleId, contentHash, planToken,
-      prereg, preregHash, tasksHash, perTask, evaluatedAt,
+      prereg, preregHash, tasksHash, perTask, fold: batch[0]?.fold, evaluatedAt,
     }),
     runs,
     order,

@@ -1,8 +1,8 @@
 # Stage-0 falsification report — harness2-recursion compose gate
 
-**Status: ISSUES** · **Verdict: GATE INVALID (rubber stamp confirmed)**
+**Status: PASS** · **Verdict: GATE INVALID (rubber stamp confirmed)**
 
-- Generated: 2026-10-21T04:15:34.533Z
+- Generated: 2026-10-21T04:26:12.141Z
 - Elapsed: 112.0s
 - Sessions: 20/20 one-shot headless sessions
 - Ledger: 40 records, 20 cycles, 20 compose decisions
@@ -27,26 +27,26 @@ One row per fresh headless session (the trigger-cycle unit). `ACCEPT` = candidat
 
 | Session | Cycle | taskId (short) | Probe | Compose | NULL | ADVERSARIAL | Decision |
 | --: | --: | :-- | :-- | :-- | :-- | :-- | :-- |
-| 1 | 1 | session-cac6070… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 2 | 2 | session-e9d9127… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 3 | 3 | session-4a89716… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 4 | 4 | session-c84a65b… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 5 | 5 | session-89fe6fd… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 6 | 6 | session-e818a91… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 7 | 7 | session-fbbb939… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 8 | 8 | session-424af40… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 9 | 9 | session-b52baee… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 10 | 10 | session-e873625… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 11 | 11 | session-2c15a02… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 12 | 12 | session-687c864… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 13 | 13 | session-321d7a1… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 14 | 14 | session-c8e996c… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 15 | 15 | session-ffd98cc… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 16 | 16 | session-faf9694… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 17 | 17 | session-8f5d47c… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 18 | 18 | session-5ccc87f… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 19 | 19 | session-2274567… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 20 | 20 | session-c778846… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 1 | 1 | session-f1bd7ca… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 2 | 2 | session-89dfddc… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 3 | 3 | session-e7c6ac0… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 4 | 4 | session-e07c996… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 5 | 5 | session-a508fae… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 6 | 6 | session-9a76411… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 7 | 7 | session-3b8f18c… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 8 | 8 | session-148044e… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 9 | 9 | session-a6790f6… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 10 | 10 | session-bda6e0f… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 11 | 11 | session-f319936… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 12 | 12 | session-8bade1e… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 13 | 13 | session-6b71de4… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 14 | 14 | session-00283e1… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 15 | 15 | session-561c4ed… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 16 | 16 | session-9f56f5e… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 17 | 17 | session-197da68… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 18 | 18 | session-2f1e7be… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 19 | 19 | session-3b5363e… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 20 | 20 | session-5798fe3… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
 
 
 
@@ -54,7 +54,7 @@ One row per fresh headless session (the trigger-cycle unit). `ACCEPT` = candidat
 
 The gate is deterministic and content-blind. For the first cycle:
 
-- baseline: {"completion":false,"toolFailures":3,"stepCount":1,"tokenCost":8270,"tokenCostSource":"measured","durationMs":180}
+- baseline: {"completion":false,"toolFailures":3,"stepCount":1,"tokenCost":8270,"tokenCostSource":"measured","durationMs":181}
 - trial null-edit: completion=true, toolFailures=0, stepCount=1, tokenCost=8580
 - trial adversarial-edit: completion=true, toolFailures=0, stepCount=1, tokenCost=8575
 - reconstructed scores (weights completion=1, toolFailures=0.5, stepCount=0.1, tokenCost=0.0001): null-edit=2.4690, adversarial-edit=2.4695
@@ -69,19 +69,19 @@ First probe record (`ledger.jsonl`):
 ```json
 {
   "version": "harness2-ledger/v3",
-  "id": "led-0a7c18ac",
+  "id": "led-f7aea639",
   "previousSnapshotRef": null,
-  "ledgerEntryId": "led-0a7c18ac",
+  "ledgerEntryId": "led-f7aea639",
   "event": "probe/completed",
   "payload": {
-    "taskId": "session-cac60703-7702-4aab-996c-59d1106a64dc",
+    "taskId": "session-f1bd7ca3-cf67-415e-88ef-dbe611d9cca5",
     "baselineMetrics": {
       "completion": false,
       "toolFailures": 3,
       "stepCount": 1,
       "tokenCost": 8270,
       "tokenCostSource": "measured",
-      "durationMs": 180
+      "durationMs": 181
     },
     "trials": [
       {
@@ -97,7 +97,7 @@ First probe record (`ledger.jsonl`):
           "stepCount": 1,
           "tokenCost": 8580,
           "tokenCostSource": "measured",
-          "durationMs": 98
+          "durationMs": 101
         }
       },
       {
@@ -113,14 +113,14 @@ First probe record (`ledger.jsonl`):
           "stepCount": 1,
           "tokenCost": 8575,
           "tokenCostSource": "measured",
-          "durationMs": 98
+          "durationMs": 103
         }
       }
     ],
     "evidenceSummary": "tool=unknown;code=SERVER; 500: {\"message\":\"stage0 fake server failure\",\"type\":\"server_error\"}",
-    "cycleId": "9e0760e2-edd2-4b07-920c-098ae90d94c4"
+    "cycleId": "291040ef-752b-4f2e-aed1-9f114bff73a2"
   },
-  "recordedAt": "2026-10-21T04:13:45.597Z"
+  "recordedAt": "2026-10-21T04:24:23.219Z"
 }
 ```
 
@@ -129,13 +129,13 @@ First compose record (`ledger.jsonl`):
 ```json
 {
   "version": "harness2-ledger/v3",
-  "id": "led-2f9ad06a",
-  "previousSnapshotRef": "led-0a7c18ac",
-  "ledgerEntryId": "led-2f9ad06a",
+  "id": "led-2f24283d",
+  "previousSnapshotRef": "led-f7aea639",
+  "ledgerEntryId": "led-2f24283d",
   "event": "compose/applied",
   "payload": {
-    "taskId": "session-cac60703-7702-4aab-996c-59d1106a64dc",
-    "cycleId": "9e0760e2-edd2-4b07-920c-098ae90d94c4",
+    "taskId": "session-f1bd7ca3-cf67-415e-88ef-dbe611d9cca5",
+    "cycleId": "291040ef-752b-4f2e-aed1-9f114bff73a2",
     "appliedCandidateIds": [
       "cand-7baa978593016eb3",
       "cand-82f5003df1cd0903"
@@ -158,11 +158,11 @@ First compose record (`ledger.jsonl`):
       "guardrails",
       "system-prompt"
     ],
-    "previousSnapshotRef": "led-0a7c18ac",
-    "ledgerEntryId": "led-2f9ad06a",
+    "previousSnapshotRef": "led-f7aea639",
+    "ledgerEntryId": "led-2f24283d",
     "applyMode": "noop-todo"
   },
-  "recordedAt": "2026-10-21T04:13:45.599Z"
+  "recordedAt": "2026-10-21T04:24:23.221Z"
 }
 ```
 
@@ -204,13 +204,13 @@ DSH_HOME=<repo>/e2e/stage0/artifacts/home FAKE_API_KEY=dummy node <dsh-0.2.1-cli
 
 - Runner: `node e2e/stage0/stage0.mjs` (repo-relative)
 - Fake server: `node e2e/stage0/fake-model-server.mjs` (started by the runner on 127.0.0.1:8850; killed in a `finally` block)
-- Session duration (all attempts): min 4.49s, median 5.08s, max 5.84s
+- Session duration (all attempts): min 4.54s, median 5.09s, max 5.61s
 - Total elapsed: 112.0s
 - Request log: 160 requests; 20 conversations show exactly 4 main requests (3 failures + 1 delayed success). Unexpected main counts: none.
 
 ## Anomalies / integrity checks
 
-- {"type":"repo-dirty-during-run","before":[" M CONTRACT.md"," M README.md"," M SELF-CHECK.md"," M package.json"," M packages/harness2-task-recursion/README.md"," M tools/harness2-apply/src/cli.mjs"," M tools/harness2-apply/src/lib.mjs"," M tools/harness2-apply/test/applier.test.mjs","?? docs/round-6-pr4.md","?? e2e/holdout/","?? tools/harness2-eval/"],"after":[" M CONTRACT.md"," M README.md"," M SELF-CHECK.md"," M package.json"," M packages/harness2-task-recursion/README.md"," M tools/harness2-apply/src/cli.mjs"," M tools/harness2-apply/src/lib.mjs"," M tools/harness2-apply/test/applier.test.mjs"," M tools/harness2-apply/test/integration.mjs","?? docs/round-6-pr4.md","?? e2e/holdout/","?? tools/harness2-eval/"]}
+None.
 
 Additional checks performed: all records are ledger v3; `appliedEdits` is one-to-one with `appliedCandidateIds`; `appliedComponents` equals the de-duplicated edit components; each applied/trial hash is re-derived from the exact proposal content; each candidate id is re-derived from `candidateType:component:content` and cross-checked against the content hash.
 
@@ -253,8 +253,8 @@ Primary rate uses compose cycles; the secondary rate uses attempted headless ses
 
 ### Isolation: repo status before/after
 
-- `git status --porcelain` (excluding `e2e/stage0/`) unchanged during the run: **no**.
-- Pre-existing dirty lines (not caused by this run): ` M CONTRACT.md ;  M README.md ;  M SELF-CHECK.md ;  M package.json ;  M packages/harness2-task-recursion/README.md ;  M tools/harness2-apply/src/cli.mjs ;  M tools/harness2-apply/src/lib.mjs ;  M tools/harness2-apply/test/applier.test.mjs ; ?? docs/round-6-pr4.md ; ?? e2e/holdout/ ; ?? tools/harness2-eval/`
+- `git status --porcelain` (excluding `e2e/stage0/`) unchanged during the run: **yes**.
+- Pre-existing dirty lines (not caused by this run): ` M CONTRACT.md ;  M README.md ;  M SELF-CHECK.md ;  M docs/round-6-pr4.md ;  M tools/harness2-apply/src/cli.mjs ;  M tools/harness2-apply/src/lib.mjs ;  M tools/harness2-apply/test/applier.test.mjs ;  M tools/harness2-eval/src/lib.mjs ;  M tools/harness2-eval/test/eval.test.mjs ;  M tools/harness2-eval/test/integration.mjs ; ?? tools/harness2-eval/src/verify.mjs`
 
 ### Per-cycle fake-server correlation
 

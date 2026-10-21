@@ -74,15 +74,26 @@ async function main() {
     })
     const reportFile = path.join(dir, 'report.json')
     await writeFile(reportFile, `${JSON.stringify(runReport.report, null, 2)}\n`, 'utf8')
-    const applied = run([APPLY, 'apply', '--home', home, '--rev', planned.revId, '--token', planned.planToken, '--evaluation', reportFile, '--yes'])
-    if (applied.evaluation !== 'accept') throw new Error('apply did not record accept evaluation')
+    // 1) fake-calibration report must NOT authorize real apply.
+    const fakeApply = spawnSync(process.execPath, [APPLY, 'apply', '--home', home, '--rev', planned.revId,
+      '--token', planned.planToken, '--evaluation', reportFile, '--yes'], { encoding: 'utf8', env: { ...process.env } })
+    if (fakeApply.status === 0) throw new Error('fake-calibration report was accepted for apply')
+    const fakeError = JSON.parse(fakeApply.stderr)
+    if (fakeError.code !== 'evaluation-fake-provider') throw new Error(`unexpected fake rejection: ${fakeError.code}`)
+    // 2) controlled debug escape hatch only, marked forced-unevaluated.
+    const applied = run([APPLY, 'apply', '--home', home, '--rev', planned.revId,
+      '--token', planned.planToken, '--allow-unevaluated', '--yes'], { HARNESS2_ALLOW_UNEVALUATED: '1' })
+    if (applied.evaluation !== 'forced-unevaluated') throw new Error('debug path did not mark forced-unevaluated')
+    const journal = (await readFile(path.join(home, 'apply', 'journal.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse)
+    if (journal.at(-1).evaluation !== 'forced-unevaluated') throw new Error('journal missing forced-unevaluated')
     run([APPLY, 'verify', '--home', home, '--rev', planned.revId, '--cli', FAKE_CLI])
     const rolled = run([APPLY, 'rollback', '--home', home, '--rev', planned.revId])
     if (rolled.restoredPatchHash !== hashOf('[]\n')) throw new Error('rollback did not restore base patch')
     console.log(JSON.stringify({
       ok: true, profile, revisionId: planned.revId, verdict: runReport.report.verdict,
-      b: runReport.report.b, c: runReport.report.c, evaluation: applied.evaluation,
-      providerClass: prereg.providerClass, note: 'synthetic fake-matrix calibration; not real efficacy',
+      b: runReport.report.b, c: runReport.report.c, fakeProviderRejected: true,
+      debugPathEvaluation: applied.evaluation, providerClass: prereg.providerClass,
+      note: 'synthetic fake-matrix calibration; fake report cannot apply; debugging uses forced env',
     }, null, 2))
   } finally {
     await rm(dir, { recursive: true, force: true })
