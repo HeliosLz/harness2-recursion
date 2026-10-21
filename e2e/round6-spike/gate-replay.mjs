@@ -21,8 +21,13 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
 const STAGE0 = path.resolve(HERE, '..', 'stage0')
 const LEDGER = process.env.SPIKE_LEDGER
   ?? path.join(STAGE0, 'artifacts', 'ledger.jsonl')
+// PR-5: compose/* no longer writes EXPERIENCE. The legacy quarantine check
+// reads a committed synthetic archival fixture instead of the runtime artifact
+// (which never existed in git) and separately asserts the current Stage-0 run
+// does not produce a fresh experience file.
 const EXPERIENCE = process.env.SPIKE_EXPERIENCE
-  ?? path.join(STAGE0, 'artifacts', 'EXPERIENCE.md')
+  ?? path.join(HERE, 'fixtures', 'legacy-experience.md')
+const STAGE0_EXPERIENCE = path.join(STAGE0, 'artifacts', 'EXPERIENCE.md')
 const OUT = path.join(HERE, 'artifacts', 'SPIKE-GATE.json')
 
 /* ── v4 policy constants (pre-registered) ─────────────────────────────────── */
@@ -221,12 +226,15 @@ const rate = (predicate) => {
 
 /* ── R6-3 legacy quarantine: entries with no evaluation are excluded ────── */
 const experienceText = await readFile(EXPERIENCE, 'utf8').catch(() => '')
+const freshStage0ExperienceText = await readFile(STAGE0_EXPERIENCE, 'utf8').catch(() => '')
+const freshStage0ExperienceEntries = [...freshStage0ExperienceText.matchAll(/<!--\s*harness2-experience:([A-Za-z0-9+/=]+)\s*-->/g)].length
 const markers = [...experienceText.matchAll(/<!--\s*harness2-experience:([A-Za-z0-9+/=]+)\s*-->/g)]
 const experienceEntries = []
 for (const marker of markers) {
   try { experienceEntries.push(JSON.parse(Buffer.from(marker[1], 'base64').toString('utf8'))) } catch { /* ignore */ }
 }
 const legacyQuarantine = {
+  fixture: path.relative(STAGE0, EXPERIENCE),
   entries: experienceEntries.length,
   acceptedWithoutEvaluation: experienceEntries
     .filter((entry) => entry?.outcome?.adoption === 'accepted')
@@ -241,6 +249,7 @@ const adversarialQuarantined = legacyQuarantine.acceptedWithoutEvaluation
   .some((entry) => entry.contentHash === adversarialHash)
 const summarize = {
   cycles: cycles.length,
+  freshStage0ExperienceEntries,
   appliedCycles: cycles.filter((cycle) => cycle.applied).length,
   v3Acceptance: {
     null: rate((t) => t.name === 'null-edit' && t.v3Accepted),
@@ -324,6 +333,7 @@ assert('tautological RCA ablation (control==trial) yields 0/20 ADVERSARIAL — a
 assert('RCA ablation is labeled tautological in the report', summarize.rcaAblationTautological === true, summarize.rcaAblationTautological)
 assert('tokenCost guard rejects a >25% token regression even when rank is positive', tokenGuardFixture.admit === false && tokenGuardFixture.tokenGuard === true, tokenGuardFixture)
 assert('legacy Stage-0 accepted experience is quarantined (no evaluation record)', legacyQuarantine.acceptedWithoutEvaluation.length > 0 && adversarialQuarantined === true, legacyQuarantine)
+assert('PR-5: a fresh Stage-0 run no longer writes EXPERIENCE.md', freshStage0ExperienceEntries === 0, { file: STAGE0_EXPERIENCE, entries: freshStage0ExperienceEntries })
 assert('v4 admission (admissibility + RCA) admits NULL 0/20', summarize.v4Admission.null.hits === 0, summarize.v4Admission.null)
 assert('v4 admission (admissibility + RCA) admits ADVERSARIAL 0/20', summarize.v4Admission.adversarial.hits === 0, summarize.v4Admission.adversarial)
 assert('legit fixture is admissible + admitted', fixtures.legit.admit === true, fixtures.legit.reason)

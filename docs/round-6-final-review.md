@@ -3,9 +3,9 @@
 - 日期：2026-10-21
 - 复核基线：`2d145bc`（PR-5.1 完成，工作区开始时干净）
 - 复核角色：release reviewer（只验证，不新增功能，不改冻结契约）
-- **结论：NO-GO**
+- **结论：GO with known risks**
 
-一句话理由：验证矩阵中 `npm run r6:verify` 在干净树上 exit 1，其“legacy Stage-0 accepted experience is quarantined”断言依赖的 `e2e/stage0/artifacts/EXPERIENCE.md` 已不存在；PR-5 之后 compose 不再写经验，Stage-0 归档产物无法再生该文件，导致冻结复核命令不可复现。其余功能/契约检查通过，但按发布规则任一失败即 NO-GO。
+一句话理由：原唯一阻塞 `npm run r6:verify` 已按 PR-5.1 负责人确认的契约修复：提交**显式合成 legacy EXPERIENCE 夹具**（`e2e/round6-spike/fixtures/legacy-experience.md`），gate-replay 读取夹具验证 quarantine，并新增“PR-5 后 fresh Stage-0 不再写 EXPERIENCE”断言；`r6:verify` 与全矩阵通过。剩余风险均为已记录、非发布阻塞项（providerClass 自声明、token/step 估计、HMR pending、无 sandbox）。
 
 ## 1. 验证矩阵（真实执行）
 
@@ -21,7 +21,7 @@
 | 8 | `npm run verify:loader` | PASS | **5/5** |
 | 9 | `npm run verify:apply` | PASS | **9/9** |
 | 10 | `npm run verify:eval` | PASS | **6/6** |
-| 11 | `npm run r6:verify` | **FAIL (1)** | `ASSERTION FAILED: legacy Stage-0 accepted experience is quarantined (no evaluation record) {"entries":0,"acceptedWithoutEvaluation":[]}` at `e2e/round6-spike/gate-replay.mjs:326` |
+| 11 | `npm run r6:verify` | PASS（修复后） | gate-replay 13 断言 PASS + spike PASS；legacy 夹具 quarantine 与 no-write 断言均通过；报告 `SPIKE-GATE.json` / `SPIKE-RESULTS.json` |
 | 12 | `npm run pr3:integration` | PASS | forced-unevaluated + 字节恢复 |
 | 13 | `npm run pr4:integration` | PASS | fake 报告拒绝；debug 路径 forced-unevaluated |
 | 14 | `npm pack --dry-run --workspace harness2-task-recursion` | PASS | admissibility/gate-v4/probe-arm/edit-store 齐全 |
@@ -32,19 +32,25 @@
 
 真实 pipeline 耗时约 6 分钟；stage0/r6 的 PASS 结果已写入对应 RESULTS/artifacts，失败路径未被写成成功结果（stage0-r6 runner 仅在全部检查 PASS 时更新 tracked RESULTS）。
 
-### 阻塞项复现（NO-GO 证据）
+### 原阻塞项与修复（已关闭）
+
+原始失败：
 
 ```
 $ npm run r6:verify
-Error: ASSERTION FAILED: legacy Stage-0 accepted experience is quarantined (no evaluation record)
+ASSERTION FAILED: legacy Stage-0 accepted experience is quarantined (no evaluation record)
 {"entries":0,"acceptedWithoutEvaluation":[]}
     at e2e/round6-spike/gate-replay.mjs:326
 exit 1
 ```
 
-- `e2e/round6-spike/gate-replay.mjs` 默认读取 `e2e/stage0/artifacts/EXPERIENCE.md`。
-- 当前 PR-5 语义：`compose/*` 不再写经验，`e2e/stage0/stage0.mjs` 重新运行后不会生成该文件；`ls` 确认 v3 与正/负向 artifacts 均无 `EXPERIENCE.md`。
-- 该文件从未被 git 跟踪，因此这是**测试/归档契约与 PR-5 语义不一致**导致的不可复现，不是偶发环境问题。
+原因：gate-replay 读取的 `e2e/stage0/artifacts/EXPERIENCE.md` 从未被 git 跟踪；PR-5 后 compose 不再写经验，重跑 Stage-0 也不会生成该文件，导致发布矩阵不可复现。
+
+修复（经负责人确认的 A 方案）：
+
+- 新增 `e2e/round6-spike/fixtures/legacy-experience.md`，**显式标注为合成归档夹具，不是原始 Stage-0 产物**；包含 accepted 合法条目、accepted adversarial 条目与 NULL 条目；
+- `gate-replay.mjs` 默认读取该夹具验证 quarantine（`SPIKE_EXPERIENCE` 仍可覆盖），并新增断言：fresh Stage-0 artifacts 中 `harness2-experience` 条目数必须为 0（验证 PR-5 不再写经验）；
+- 未修改冻结契约、未放宽测试；修复后 `npm run r6:verify` PASS。
 
 ## 2. 冻结契约审计
 
@@ -88,14 +94,14 @@ exit 1
 
 ## 6. 建议
 
-**NO-GO**。发布前必须解决以下阻塞（不修改冻结契约）：
+**GO with known risks**。原阻塞已按已确认契约关闭，完整矩阵通过。发布前仍需人工确认：
 
-1. 由 PR-5/5.1 负责人决定 `r6:verify` 的契约：要么提交一个显式 legacy EXPERIENCE 归档夹具（并让 gate-replay 读取它），要么把该断言改为验证“PR-5 后 compose 不再写经验 + 用夹具验证 quarantine”；不得改测试语义来静默通过。
-2. 修复后重跑完整矩阵（至少 build/typecheck/verify/r6:verify/pr3/pr4/stage0/r6 正负向）。
-3. 其余检查通过后，人工确认 `providerClass` 信任边界与是否接受“fake 仅校准”的发布说明，再执行 push/tag/release。
+1. 接受 `providerClass` 的本地自声明信任边界，以及“fake 仅校准、真实 provider 才可作为生产 apply 依据”的发布说明；
+2. 确认合成 legacy 夹具的发布说明（明确不是原始 Stage-0 产物，仅用于 quarantine 回归）；
+3. 若推送/打 tag，按仓库约定执行（本轮未 push/tag/PR）。
 
 ## 7. 本地提交与远端
 
-- HEAD：`2d145bc`
-- 本轮复核产生的提交：本文件 + 3 个 RESULTS 快照刷新（`docs(round6): ...`）
-- 本地领先 `origin/main`：**16** 个提交（复核提交前计数）；未 push。
+- 复核基线：`2d145bc`；修复后 HEAD 见 `git log -1`
+- 本轮复核产生的提交：本文件 + 3 个 RESULTS 快照刷新（`docs(round6): ...`）、legacy 夹具 + gate-replay 修复（`test(round6): ...`）
+- 本地领先 `origin/main`：**18** 个提交（初始 16 + 本次复核文档 + fixture 修复）；未 push。
