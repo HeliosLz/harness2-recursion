@@ -221,3 +221,17 @@ test('rollback: modified patch requires --force; desktop profile is refused', as
     assert.equal(desktop.json.code, 'desktop-profile-refused')
   } finally { await rm(ctx.dir, { recursive: true, force: true }) }
 })
+
+
+test('cli: --help and the help subcommand print usage', () => {
+  for (const args of [['--help'], ['-h'], ['help']]) {
+    const result = run(args)
+    assert.equal(result.status, 0, `${args.join(' ')} must exit 0: ${result.stderr}`)
+    assert.match(result.stdout, /harness2-apply — PR-3 offline profile-patch applier/)
+    assert.match(result.stdout, /Usage:/)
+    assert.match(result.stdout, /apply --rev <rev> --token <planToken> --allow-unevaluated --yes/)
+  }
+  const unknown = run(['--not-a-command'])
+  assert.equal(unknown.status, 1)
+  assert.equal(unknown.json.code, 'unknown-command')
+})

@@ -4,6 +4,7 @@
 - 基线：PR-2 + candidateId guard（`0486415`，`npm run verify` 50/50）
 - 状态：**已实现并验收**；未进入 PR-4/5
 - 工具：`tools/harness2-apply/`（独立纯 JS `.mjs` + JSDoc，不 import task/meta 源码）
+- 文档修订（2026-10-21）：`--help`/`-h` 现在在子命令之前生效；`help` 子命令同样可用（新增 CLI 测试）
 
 ## 1. 命令与状态机
 

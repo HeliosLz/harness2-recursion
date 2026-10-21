@@ -15,6 +15,10 @@ import {
 const COMMANDS = new Set(['plan', 'preflight', 'apply', 'verify', 'rollback', 'status', 'help'])
 
 function parseArgs(argv) {
+  // `--help`/`-h` are global: they must work before a subcommand is chosen.
+  if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') {
+    return { command: 'help', options: {} }
+  }
   const command = argv[0]
   if (!COMMANDS.has(command)) throw new ApplyError('unknown-command', `unknown command: ${String(command)}`)
   const options = {}
