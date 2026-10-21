@@ -1,4 +1,8 @@
-# harness2-task-recursion
+# dsh-harness2-task-recursion
+
+> npm 分发名：`dsh-harness2-task-recursion`；插件导出 `name` 仍为冻结的 `harness2-task-recursion`。
+
+旧目录名：`harness2-task-recursion`。
 
 任务级递归插件（dsh 0.2.1-rc.2 / Cordis 4，**第三轮冻结契约**）。
 

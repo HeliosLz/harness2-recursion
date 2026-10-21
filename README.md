@@ -1,13 +1,29 @@
 # harness2-recursion
 
-Harness² 递归方案 —— 两个互相独立、可分别加载的 dsh 插件（**第四轮冻结契约版本**）。
+Harness² 递归方案 —— 两个互相独立、可分别加载的 dsh 插件（**Round-6 冻结契约版本**）。
 
-| 包 | 职责 |
-| :-- | :-- |
-| [`packages/harness2-task-recursion`](packages/harness2-task-recursion) | 任务级递归：Propose → Probe → `probe/completed` → 确定性 Compose 门禁 → 账本 v3 → `compose/applied`/`compose/rejected` → 下一个 pre-step 应用 pendingPatch |
-| [`packages/harness2-meta-recursion`](packages/harness2-meta-recursion) | Harnessing 级递归：消费三事件 → 事后归因（edit 只取事实）→ 经验库 → 冻结只读门面 `harness2Experience` |
+| npm 包名（待发布） | 仓库目录 | 职责 |
+| :-- | :-- | :-- |
+| `dsh-harness2-task-recursion` | [`packages/harness2-task-recursion`](packages/harness2-task-recursion) | 任务级递归：Propose → Probe → `probe/completed` → 确定性 Compose 门禁 → 账本 v3 → `compose/applied`/`compose/rejected` → 下一个 pre-step 应用 pendingPatch |
+| `dsh-harness2-meta-recursion` | [`packages/harness2-meta-recursion`](packages/harness2-meta-recursion) | Harnessing 级递归：消费结构化事件 → verified evaluation → 经验库 → 冻结只读门面 `harness2Experience` |
+
+> npm 包名已就绪（`private` 已移除、`cordis.patch.yml` 的解析名已切换），但本轮尚未 `npm publish`；
+> 发布前仍可用 GitHub 目录或 path spec 安装。插件导出的 `name` 仍是冻结的> `harness2-task-recursion` / `harness2-meta-recursion`（row id 与契约不变），npm 包名只是分发名。
 
 两个包的 `src/index.ts` **互不 import**；`src/constants.ts` **逐字节相同**。契约见 [CONTRACT.md](CONTRACT.md)，验收见 [SELF-CHECK.md](SELF-CHECK.md)。
+
+### 安装
+
+```bash
+# npm 发布后
+dsh plugin --profile <name> add dsh-harness2-task-recursion
+dsh plugin --profile <name> add dsh-harness2-meta-recursion
+
+# 或直接从当前仓库目录安装
+dsh plugin --profile <name> add ./packages/harness2-task-recursion
+dsh plugin --profile <name> add ./packages/harness2-meta-recursion
+```
+
 
 ## 目录
 
@@ -109,7 +125,7 @@ E2E_CLI="<dsh-0.2.1-runtime>/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js" node 
 Ledger: 4 v3 records (2 probe/completed + 2 compose/applied)
 applyMode: run1=noop-todo, run2=next-task-ledger
 Revision anchor chain: null -> led-… -> led-… -> led-…
-EXPERIENCE.md entries: 1 (confidence 0.50, measured tokens)
+EXPERIENCE.md entries: 0 (PR-5: compose is diagnostic only)
 Sessions: 2 (exit 0)
 ```
 

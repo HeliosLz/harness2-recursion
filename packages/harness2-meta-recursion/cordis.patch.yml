@@ -1,4 +1,4 @@
-# harness2-meta-recursion — Profile patch layer (round-1 skeleton)
+# dsh-harness2-meta-recursion — Profile patch layer
 #
 # Inserts the harnessing-level recursion row. Every config default lives in
 # the exported Schemastery `Config` schema; this row intentionally passes an
@@ -8,5 +8,5 @@
 # harness2-task-recursion; it never subscribes to raw session or tool events.
 - insert:
     - id: harness2-meta-recursion
-      name: harness2-meta-recursion
+      name: dsh-harness2-meta-recursion
       config: {}

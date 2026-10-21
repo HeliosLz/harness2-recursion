@@ -98,12 +98,12 @@ function renderPatch({ personaPrefix }) {
     includeRuntimeContext: true
     personaPrefix: '${personaPrefix}'
 - id: harness2-task-recursion
-  name: harness2-task-recursion
+  name: dsh-harness2-task-recursion
   config:
     ledgerPath: ${path.join(ART, 'ledger.jsonl')}
     observeOnly: true
 - id: harness2-meta-recursion
-  name: harness2-meta-recursion
+  name: dsh-harness2-meta-recursion
   config:
     experiencePath: ${path.join(ART, 'EXPERIENCE.md')}
 `

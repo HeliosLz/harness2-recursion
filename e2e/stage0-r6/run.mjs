@@ -108,7 +108,7 @@ function patchYaml() {
 - id: session-title-llm
   disabled: true
 - id: harness2-task-recursion
-  name: harness2-task-recursion
+  name: dsh-harness2-task-recursion
   config:
     ledgerPath: ${LEDGER}
     observeOnly: false
@@ -122,7 +122,7 @@ function patchYaml() {
     repeatedFailureWindow: 3
     cooldownMs: 0
 - id: harness2-meta-recursion
-  name: harness2-meta-recursion
+  name: dsh-harness2-meta-recursion
   config:
     experiencePath: ${EXPERIENCE}
     llmReflectionModel: faketest/propose-model
@@ -135,9 +135,9 @@ const startedAt = Date.now()
 async function main() {
   assert(spawnSync('test', ['-f', CLI]).status === 0, `dsh CLI not found at ${CLI}`)
   assert(spawnSync('test', ['-f', FAKE_SERVER]).status === 0, 'stage0 fake server missing')
-  for (const packageName of ['harness2-task-recursion', 'harness2-meta-recursion']) {
-    assert(spawnSync('test', ['-f', path.join(REPO, 'packages', packageName, 'lib', 'index.js')]).status === 0,
-      `${packageName} is not built; run npm run build`)
+  for (const dirName of ['harness2-task-recursion', 'harness2-meta-recursion']) {
+    assert(spawnSync('test', ['-f', path.join(REPO, 'packages', dirName, 'lib', 'index.js')]).status === 0,
+      `${dirName} is not built; run npm run build`)
   }
   await rm(HOME, { recursive: true, force: true })
   await mkdir(ART, { recursive: true })
@@ -150,8 +150,11 @@ async function main() {
   log('creating isolated headless profile')
   const create = runCli(['--profile', PROFILE, '--from-default-profile', 'headless', '--dump-config'])
   assert(create.status === 0, `profile creation failed: ${create.stderr}`)
-  for (const packageName of ['harness2-task-recursion', 'harness2-meta-recursion']) {
-    const add = runCli(['plugin', '--profile', PROFILE, 'add', path.join(REPO, 'packages', packageName)])
+  for (const [dirName, packageName] of [
+    ['harness2-task-recursion', 'dsh-harness2-task-recursion'],
+    ['harness2-meta-recursion', 'dsh-harness2-meta-recursion'],
+  ]) {
+    const add = runCli(['plugin', '--profile', PROFILE, 'add', path.join(REPO, 'packages', dirName)])
     assert(add.status === 0, `plugin add ${packageName} failed: ${add.stderr}`)
   }
   await writeFile(path.join(PROFILE_DIR, 'cordis.patch.yml'), patchYaml(), 'utf8')

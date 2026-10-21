@@ -1,8 +1,7 @@
 {
-  "name": "harness2-task-recursion",
-  "version": "0.2.0",
-  "private": true,
-  "description": "Task-level recursion: probe repeated failures with a subagent, gate a safe compose step, and record versioned evidence.",
+  "name": "dsh-harness2-task-recursion",
+  "version": "0.2.1",
+  "description": "Task-level recursion: Propose → Probe → Gate-v4 admission → ledger v3 → compose decisions.",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -71,5 +70,18 @@
     "deepseek-harness",
     "harness2",
     "recursion"
-  ]
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HeliosLz/harness2-recursion.git",
+    "directory": "packages/harness2-task-recursion"
+  },
+  "homepage": "https://github.com/HeliosLz/harness2-recursion/tree/main/packages/harness2-task-recursion#readme",
+  "bugs": {
+    "url": "https://github.com/HeliosLz/harness2-recursion/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }

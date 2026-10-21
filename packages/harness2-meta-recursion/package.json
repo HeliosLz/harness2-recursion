@@ -1,8 +1,7 @@
 {
-  "name": "harness2-meta-recursion",
-  "version": "0.2.0",
-  "private": true,
-  "description": "Harnessing-level recursion: distill probe/compose evidence into an experience library and serve read-only priors.",
+  "name": "dsh-harness2-meta-recursion",
+  "version": "0.2.1",
+  "description": "Harnessing-level recursion: verified evaluation ingestion, experience library, read-only harness2Experience facade.",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -59,5 +58,18 @@
     "deepseek-harness",
     "harness2",
     "recursion"
-  ]
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HeliosLz/harness2-recursion.git",
+    "directory": "packages/harness2-meta-recursion"
+  },
+  "homepage": "https://github.com/HeliosLz/harness2-recursion/tree/main/packages/harness2-meta-recursion#readme",
+  "bugs": {
+    "url": "https://github.com/HeliosLz/harness2-recursion/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }

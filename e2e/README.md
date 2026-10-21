@@ -36,7 +36,7 @@ E2E_CLI="$DSH_RUNTIME_DIR/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js" node e2e
 4. 写入 profile patch：假 provider（`retryPolicy: always`，前 3 次 500 后延迟成功）、禁用 `session-title-llm`、两个插件的配置；
 5. `--dump-config` 断言两插件 rows 与配置在最终配置中；
 6. 跑两次 headless 会话（第一次账本不存在，第二次已有 v3 修订）；
-7. 读取 `ledger.jsonl` / `EXPERIENCE.md` 断言：v3 envelope、事件顺序、token 测量来源、`applyMode`（run1=`noop-todo`，run2=`next-task-ledger`）、`previousSnapshotRef` 链、`appliedEdits` 哈希与 trial 事实一致、经验条目非空；
+7. 读取 `ledger.jsonl` 断言：v3 envelope、事件顺序、token 测量来源、`applyMode`（run1=`noop-todo`，run2=`next-task-ledger`）、`previousSnapshotRef` 链、`appliedEdits` 哈希与 trial 事实一致；PR-5 后 compose 仅诊断，断言 `EXPERIENCE.md` **不产生** compose-derived 条目；
 8. 生成 `e2e/artifacts/RESULTS.md`。
 
 ## 预期结果（本机实测）
@@ -45,7 +45,7 @@ E2E_CLI="$DSH_RUNTIME_DIR/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js" node e2e
 Ledger: 4 v3 records (2 probe/completed + 2 compose/applied)
 applyMode: run1=noop-todo, run2=next-task-ledger
 Revision anchor chain: null -> led-… -> led-… -> led-…
-EXPERIENCE.md entries: 1
+EXPERIENCE.md entries: 0 (PR-5: compose is diagnostic only)
 Token measurement: measured (tokenMeter)
 ```
 

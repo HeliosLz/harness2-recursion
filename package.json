@@ -2,7 +2,7 @@
   "name": "harness2-recursion",
   "version": "0.2.0",
   "private": true,
-  "description": "Round-1 skeletons for the harness-level recursion pair: harness2-task-recursion and harness2-meta-recursion.",
+  "description": "harness2-recursion: two independent dsh plugins for task-level and harnessing-level recursion",
   "type": "module",
   "workspaces": [
     "packages/*"
@@ -11,8 +11,8 @@
     "node": ">=24"
   },
   "scripts": {
-    "build": "npm run build --workspace harness2-task-recursion && npm run build --workspace harness2-meta-recursion",
-    "typecheck": "npm run typecheck --workspace harness2-task-recursion && npm run typecheck --workspace harness2-meta-recursion",
+    "build": "npm run build --workspace dsh-harness2-task-recursion && npm run build --workspace dsh-harness2-meta-recursion",
+    "typecheck": "npm run typecheck --workspace dsh-harness2-task-recursion && npm run typecheck --workspace dsh-harness2-meta-recursion",
     "verify": "node --test test/loader-smoke.mjs packages/harness2-task-recursion/test/verify.mjs packages/harness2-meta-recursion/test/verify.mjs",
     "verify:loader": "node --test test/loader-smoke.mjs",
     "verify:task": "node --test packages/harness2-task-recursion/test/verify.mjs",
@@ -45,5 +45,14 @@
     "deepseek-harness",
     "harness2",
     "recursion"
-  ]
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HeliosLz/harness2-recursion.git"
+  },
+  "homepage": "https://github.com/HeliosLz/harness2-recursion#readme",
+  "bugs": {
+    "url": "https://github.com/HeliosLz/harness2-recursion/issues"
+  }
 }

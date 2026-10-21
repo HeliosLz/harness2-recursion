@@ -10,7 +10,7 @@
 - edit bodies: 2 unique (2 hash-valid), referenced hashes 2, missing 0
 - applied edit counts: []
 - fake requests: {"main":80,"propose":20}
-- elapsed: 116.2s
+- elapsed: 116.1s
 
 ## Checks
 - PASS — every session exits 0

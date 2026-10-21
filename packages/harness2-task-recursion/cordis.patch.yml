@@ -1,4 +1,4 @@
-# harness2-task-recursion — Profile patch layer (round-1 skeleton)
+# dsh-harness2-task-recursion — Profile patch layer
 #
 # The launcher appends this patch after the bundle layers. It inserts the
 # task-level recursion row. Every config default lives in the exported
@@ -9,5 +9,5 @@
 # separate packages by contract.
 - insert:
     - id: harness2-task-recursion
-      name: harness2-task-recursion
+      name: dsh-harness2-task-recursion
       config: {}

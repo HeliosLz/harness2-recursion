@@ -141,7 +141,7 @@ function patchYaml() {
 - id: session-title-llm
   disabled: true
 - id: harness2-task-recursion
-  name: harness2-task-recursion
+  name: dsh-harness2-task-recursion
   config:
     observeOnly: false
     gatePolicy: v3
@@ -153,7 +153,7 @@ function patchYaml() {
     maxCostPerCycle: 500000
     probeTimeoutMs: 60000
 - id: harness2-meta-recursion
-  name: harness2-meta-recursion
+  name: dsh-harness2-meta-recursion
   config:
     experiencePath: ${EXPERIENCE}
     llmReflectionModel: faketest/propose-model
@@ -220,8 +220,11 @@ async function setupProfile() {
 
   log('installing both bundles through the official plugin path')
   const installs = []
-  for (const packageName of ['harness2-task-recursion', 'harness2-meta-recursion']) {
-    const packageDir = path.join(REPO, 'packages', packageName)
+  for (const [dirName, packageName] of [
+    ['harness2-task-recursion', 'dsh-harness2-task-recursion'],
+    ['harness2-meta-recursion', 'dsh-harness2-meta-recursion'],
+  ]) {
+    const packageDir = path.join(REPO, 'packages', dirName)
     const result = runCli(['plugin', '--profile', PROFILE, 'add', packageDir])
     installs.push({
       package: packageName,
@@ -260,7 +263,7 @@ async function setupProfile() {
   }
 
   const deps = JSON.parse(await readFile(path.join(PROFILE_DIR, 'package.json'), 'utf8')).dependencies ?? {}
-  for (const packageName of ['harness2-task-recursion', 'harness2-meta-recursion']) {
+  for (const packageName of ['dsh-harness2-task-recursion', 'dsh-harness2-meta-recursion']) {
     if (typeof deps[packageName] !== 'string') {
       throw new Error(`profile dependencies do not contain ${packageName}`)
     }
