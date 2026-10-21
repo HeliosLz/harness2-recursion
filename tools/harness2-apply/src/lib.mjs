@@ -13,6 +13,7 @@ import {
   stat, symlink, writeFile,
 } from 'node:fs/promises'
 import { homedir } from 'node:os'
+import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import YAML from 'yaml'
 
@@ -461,7 +462,7 @@ export async function planRevision(options) {
 
 /* ── preflight / verify helpers ──────────────────────────────────────────── */
 
-async function copyProfileResolvedLinks(source, destination) {
+export async function copyProfileResolvedLinks(source, destination) {
   await mkdir(destination, { recursive: true })
   for (const entry of await readdir(source, { withFileTypes: true })) {
     const from = path.join(source, entry.name)
@@ -576,19 +577,71 @@ export async function verifyRevision(options) {
 
 /* ── apply / rollback / status ───────────────────────────────────────────── */
 
+function stableStringify(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(',')}]`
+  const keys = Object.keys(value).sort()
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`
+}
+
+function evalReportHash(report) {
+  const { reportHash: _ignored, ...rest } = report
+  return hashOf(stableStringify(rest))
+}
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
+const DEFAULT_EVAL_PREREG = path.join(REPO_ROOT, 'e2e', 'holdout', 'preregistration.json')
+const DEFAULT_EVAL_TASKS = path.join(REPO_ROOT, 'e2e', 'holdout', 'tasks.jsonl')
+
+/** Validate a PR-4 evaluation report against the revision/manifest. */
+export async function validateEvaluationReport(reportFile, manifest, options = {}) {
+  let report
+  try { report = JSON.parse(await readFile(reportFile, 'utf8')) } catch (error) {
+    throw new ApplyError('evaluation-invalid', `cannot read evaluation report: ${error.message}`)
+  }
+  if (report?.schema !== 'harness2-eval/v1') throw new ApplyError('evaluation-invalid', 'report schema must be harness2-eval/v1')
+  if (report.verdict !== 'accept') throw new ApplyError('evaluation-rejected', `evaluation verdict is ${String(report.verdict)}; only accept may apply`)
+  if (report.revisionId !== manifest.revId) throw new ApplyError('evaluation-mismatch', 'evaluation revisionId does not match manifest')
+  if (report.planToken !== manifest.planToken) throw new ApplyError('evaluation-mismatch', 'evaluation planToken does not match manifest')
+  if (!manifest.contentHashes.includes(report.contentHash)) throw new ApplyError('evaluation-mismatch', 'evaluation contentHash does not match manifest')
+  if (report.reportHash !== evalReportHash(report)) throw new ApplyError('evaluation-invalid', 'reportHash does not match report content')
+  for (const key of ['batchId', 'preregHash', 'tasksHash']) {
+    if (typeof report[key] !== 'string' || report[key].length === 0) throw new ApplyError('evaluation-invalid', `report missing ${key}`)
+  }
+  const preregFile = options.preregFile ?? DEFAULT_EVAL_PREREG
+  const tasksFile = options.tasksFile ?? DEFAULT_EVAL_TASKS
+  const [preregHash, tasksHash] = await Promise.all([hashOf(await readFile(preregFile, 'utf8')), hashOf(await readFile(tasksFile, 'utf8'))])
+  if (report.preregHash !== preregHash) throw new ApplyError('evaluation-mismatch', 'preregHash does not match the registered preregistration')
+  if (report.tasksHash !== tasksHash) throw new ApplyError('evaluation-mismatch', 'tasksHash does not match the holdout tasks file')
+  return report
+}
+
 export async function applyRevision(options) {
-  const { dshHome, editsDir, revId, token, yes = false, allowUnevaluated = false, cliPath } = options
+  const { dshHome, editsDir, revId, token, yes = false, allowUnevaluated = false, evaluation, cliPath } = options
   const { dir, manifest } = await loadRevision(editsDir, revId)
   const paths = profilePaths(dshHome, manifest.profile)
   if (manifest.metadataMismatch.length > 0) throw new ApplyError('body-metadata-mismatch', 'refusing to apply a revision with metadata mismatch')
   if (token !== manifest.planToken) throw new ApplyError('token-mismatch', 'plan token does not match the revision')
-  if (!allowUnevaluated) throw new ApplyError('evaluation-required', 'PR-4 Gate-B evaluation is not wired; pass --allow-unevaluated only for a controlled test profile')
-  if (!yes) throw new ApplyError('confirmation-required', 'apply requires --yes after human review')
   const preflightText = await readTextOrNull(path.join(dir, 'preflight.json'))
   if (preflightText === null) throw new ApplyError('preflight-required', 'run preflight before apply')
   const preflight = JSON.parse(preflightText)
   if (preflight.ok !== true || preflight.basePatchHash !== manifest.basePatchHash || preflight.renderedPatchHash !== manifest.renderedPatchHash) {
     throw new ApplyError('preflight-stale', 'preflight does not match this revision')
+  }
+  if (!yes) throw new ApplyError('confirmation-required', 'apply requires --yes after human review')
+  let evaluationMode
+  let evaluationMeta
+  if (typeof evaluation === 'string' && evaluation.length > 0) {
+    const report = await validateEvaluationReport(evaluation, manifest, options)
+    evaluationMode = 'accept'
+    evaluationMeta = { evaluationReportHash: report.reportHash, verdict: report.verdict, batchId: report.batchId }
+  } else {
+    if (!allowUnevaluated) throw new ApplyError('evaluation-required', 'apply requires --evaluation <report.json> with verdict accept')
+    if (process.env.HARNESS2_ALLOW_UNEVALUATED !== '1') {
+      throw new ApplyError('evaluation-force-env-required', '--allow-unevaluated requires HARNESS2_ALLOW_UNEVALUATED=1 and is for controlled tests only')
+    }
+    evaluationMode = 'forced-unevaluated'
+    evaluationMeta = { evaluationReportHash: null, verdict: 'forced-unevaluated', batchId: null }
   }
   const currentText = (await readTextOrNull(paths.patchPath)) ?? '[]\n'
   if (hashOf(currentText) !== manifest.basePatchHash) {
@@ -612,11 +665,23 @@ export async function applyRevision(options) {
   const dumpText = await dumpForProfile({ dshHome, profile: manifest.profile, cliPath }).catch(() => '')
   const hmrRow = dumpText.length > 0 ? parseDumpRows(dumpText).get('hmr') : undefined
   const reload = hmrRow !== undefined && hmrRow.disabled !== true ? 'hmr-pending-human-confirm' : 'restart-required'
-  const active = { schema: APPLY_SCHEMA, kind: 'active', revisionId: revId, profile: manifest.profile, basePatchHash: manifest.basePatchHash, renderedPatchHash: manifest.renderedPatchHash, reload, evaluation: 'not-run', appliedAt: new Date().toISOString() }
+  const active = {
+    schema: APPLY_SCHEMA, kind: 'active', revisionId: revId, profile: manifest.profile,
+    basePatchHash: manifest.basePatchHash, renderedPatchHash: manifest.renderedPatchHash,
+    reload, evaluation: evaluationMode, ...evaluationMeta, appliedAt: new Date().toISOString(),
+  }
   await mkdir(path.join(dshHome, 'apply'), { recursive: true })
   await atomicWrite(path.join(dshHome, 'apply', 'active.json'), `${JSON.stringify(active, null, 2)}\n`)
-  await appendJournal(dshHome, { kind: 'committed', revisionId: revId, profile: manifest.profile, cycleId: manifest.cycleId, basePatchHash: manifest.basePatchHash, renderedPatchHash: manifest.renderedPatchHash, reload, evaluation: 'not-run', recordedAt: new Date().toISOString() })
-  return { revisionId: revId, reload, evaluation: 'not-run' }
+  await appendJournal(dshHome, {
+    kind: 'committed', revisionId: revId, profile: manifest.profile, cycleId: manifest.cycleId,
+    basePatchHash: manifest.basePatchHash, renderedPatchHash: manifest.renderedPatchHash,
+    reload, evaluation: evaluationMode, ...evaluationMeta, recordedAt: new Date().toISOString(),
+  })
+  await atomicWrite(path.join(dir, 'manifest.json'), `${JSON.stringify({
+    ...manifest,
+    application: { reload, evaluation: evaluationMode, ...evaluationMeta, appliedAt: new Date().toISOString() },
+  }, null, 2)}\n`)
+  return { revisionId: revId, reload, evaluation: evaluationMode, ...evaluationMeta }
 }
 
 export async function rollbackRevision(options) {

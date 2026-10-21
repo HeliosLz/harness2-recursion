@@ -64,3 +64,8 @@ npm run stage0:r6:positive                     # live Gate-v4 正向验收
 - 工具在仓库根 `tools/harness2-apply/`（独立进程，不 import 本插件源码）。
 - 消费 PR-2 的 `<editsDir>/<hex>.json`，plan → preflight → apply → rollback；`--allow-unevaluated` 仅 PR-4 前受控使用。
 - 不修改本插件的 ledger/bus/confidence/`AppliedEdit`。
+
+## Round-6 PR-4（Gate-B evaluation）
+
+- 评估工具在仓库根 `tools/harness2-eval/`（独立进程）；applier `apply` 默认要求 accept `harness2-eval/v1` 报告。
+- 不修改本插件的 ledger/bus/confidence/`AppliedEdit`；fake-provider 仅校准，真实 provider 报告才用于生产 apply。

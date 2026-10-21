@@ -43,7 +43,8 @@ function help() {
 Usage:
   harness2-apply plan --profile <name> --ledger <path> [--edits <dir>] [--cycle <id>] [--cli <dsh bin.js>]
   harness2-apply preflight --rev <rev> [--smoke-cmd <shell command>] [--cli <dsh bin.js>] [--home <DSH_HOME>]
-  harness2-apply apply --rev <rev> --token <planToken> --allow-unevaluated --yes [--home <DSH_HOME>]
+  harness2-apply apply --rev <rev> --token <planToken> --evaluation <report.json> --yes [--home <DSH_HOME>]
+  harness2-apply apply ... --allow-unevaluated --yes   # forced escape hatch, requires HARNESS2_ALLOW_UNEVALUATED=1
   harness2-apply verify --rev <rev> [--smoke-cmd <shell command>] [--cli <dsh bin.js>] [--home <DSH_HOME>]
   harness2-apply rollback --rev <rev> [--force] [--home <DSH_HOME>]
   harness2-apply status [--home <DSH_HOME>] [--edits <dir>]
@@ -55,7 +56,7 @@ Global options:
 
 Policy:
   - refuses the desktop profile and path traversal;
-  - apply requires preflight + --yes + --allow-unevaluated (PR-4 Gate-B is not wired);
+  - apply requires preflight + --yes + an accept harness2-eval/v1 report (PR-4);
   - toolOrder / persona-suffix revisions require an explicit --smoke-cmd;
   - reload is reported as restart-required or hmr-pending-human-confirm, never "live".
 `
@@ -113,6 +114,7 @@ async function main() {
       token: options.token,
       yes: options.yes === true,
       allowUnevaluated: options['allow-unevaluated'] === true,
+      evaluation: options.evaluation,
       cliPath,
     })
     process.stdout.write(`${JSON.stringify({ ok: true, ...result }, null, 2)}\n`)

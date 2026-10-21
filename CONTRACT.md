@@ -305,3 +305,14 @@ Gate-v4 的 `compose/rejected.rejectedCandidateIds` 为 **audit-complete**：列
 - **verify/rollback**：verify 重新 dump/断言目标值；rollback 当前 patch 与 renderedPatchHash 不一致时默认拒绝（`--force` 才恢复），恢复后校验 `basePatchHash`，重复 rollback 幂等。
 - **安全**：拒绝 desktop profile、路径穿越；`!!js` 行不渲染；不读写 EXPERIENCE、不发 bus 事件、不改 ledger v3/`AppliedEdit`/confidence/`applyMode`。
 - **偏差**：`--allow-unevaluated` 是 PR-4 前的受控临时入口；smoke 供应商由调用方提供；HMR 仅 pending 标记。
+
+## 13. PR-4（Gate-B evaluation + applier enforcement，已实现）
+
+- 任务集 `e2e/holdout/tasks.jsonl`（36 tasks = 3 folds × 12，`taskDomain:'eval-holdout'`）+ `tasks.lock.json` + `preregistration.json`（schema `harness2-prereg/v1`，OEP/v1）。
+- 四臂 C/R/I/T：C 当前 profile、R byte-identical 重跑、I 形状匹配 inert patch（同时作为 NULL revision 检查）、T canary + revision patch；成功判定为确定性 checker（exit + marker），不采信模型自述。
+- 统计：`Δ̂=(b−c)/N`、精确单侧 McNemar；accept 需 `Δ̂≥0.15 ∧ p<0.05 ∧ median(toolFailures_T)≤median(_C)+1 ∧ median(tokenCost_T)≤1.25×median(_C) ∧ 0 mount/schema ∧ R−C≤2/N ∧ I 未被接受`；缺数据 → `inconclusive` 且不得 apply。
+- 报告 schema `harness2-eval/v1` 写入 `<editsDir 同级>/eval/<batchId>/report.json`，含 reportHash；`harness2-eval replay` 可仅凭 report + 当前 tasks/prereg 重算校验，重算依赖 provider 之外的全部数据。
+- applier：`apply --evaluation <report.json>` 成为默认强制前置；校验 revisionId/contentHash/planToken/preregHash/tasksHash/reportHash 与 manifest 及注册文件一致，且 verdict 必须 `accept`；journal/active/manifest 记录 `evaluationReportHash/verdict/batchId`。
+- `--allow-unevaluated` 废弃为调试逃生口：需 `HARNESS2_ALLOW_UNEVALUATED=1`，记录 `evaluation:'forced-unevaluated'`；默认路径必须要求 evaluation。
+- preflight 不要求 evaluation；仍拒绝 desktop；不改 ledger v3/bus/`AppliedEdit`/confidence/Gate-v4。
+- 边界：fake-provider 仅为 `fake-calibration` 工具校准，不作为真实效能证据；真实 provider 由操作者运行。

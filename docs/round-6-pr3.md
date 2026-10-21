@@ -70,7 +70,7 @@ node tools/harness2-apply/bin/harness2-apply.mjs status
 
 ## 5. 偏差与未完成
 
-- **PR-4 前无评估报告**：`apply` 强制 `--allow-unevaluated` 才写真实 profile；journal/manifest 固定 `evaluation:'not-run'`。这是受控临时入口，不是最终语义。
+- **PR-4 前无评估报告**：`apply` 需 `--allow-unevaluated` 才写真实 profile；journal/manifest 固定 `evaluation:'not-run'`。PR-4 起默认要求 `--evaluation <accept report>`；`--allow-unevaluated` 仅在 `HARNESS2_ALLOW_UNEVALUATED=1` 下作为调试逃生口，记录 `forced-unevaluated`。
 - `toolOrder` / persona-suffix 的 smoke 必须由调用方提供命令；applier 不内置 smoke 供应商。
 - HMR 只标记 `hmr-pending-human-confirm`，未验证 live reload；headless 一律 `restart-required`。
 - preflight 使用 profile 临时复制（符号链接解析为绝对路径）；复杂 profile 的插件运行时副作用未执行 smoke 以外检查。

@@ -11,6 +11,7 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import { applyManagedBlock, hashOf, sha256Hex } from '../src/lib.mjs'
+import { buildReport, hashOf as evalHashOf, loadPrereg, loadTasks } from '../../harness2-eval/src/lib.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const APP = path.resolve(HERE, '..')
@@ -63,6 +64,35 @@ async function setup({ content = PERSONA, component = 'system-prompt', operation
     },
   })}\n`, 'utf8')
   return { dir, home, profile, profileDir, ledgerPath, editsDir, contentHash, body, id }
+}
+
+async function evaluationReport(ctx, planned, { accept = true } = {}) {
+  const repo = path.resolve(HERE, '..', '..', '..')
+  const tasksFile = path.join(repo, 'e2e', 'holdout', 'tasks.jsonl')
+  const preregFile = path.join(repo, 'e2e', 'holdout', 'preregistration.json')
+  const { tasks, text } = await loadTasks(tasksFile)
+  const prereg = await loadPrereg(preregFile)
+  const batch = tasks.filter((task) => task.fold === 0)
+  const manifest = JSON.parse(await readFile(path.join(planned.json.dir, 'manifest.json'), 'utf8'))
+  const perTask = batch.map((task, index) => {
+    const tSuccess = accept && index < 10
+    const arms = {
+      C: { success: false, toolFailures: 0, stepCount: 1, tokenCost: 1000, durationMs: 5, mountFailed: false, schemaFailed: false },
+      R: { success: false, toolFailures: 0, stepCount: 1, tokenCost: 1000, durationMs: 5, mountFailed: false, schemaFailed: false },
+      I: { success: false, toolFailures: 0, stepCount: 1, tokenCost: 1000, durationMs: 5, mountFailed: false, schemaFailed: false },
+      T: { success: tSuccess, toolFailures: 0, stepCount: 1, tokenCost: 1000, durationMs: 5, mountFailed: false, schemaFailed: false },
+    }
+    return { taskId: task.id, arms }
+  })
+  const report = buildReport({
+    batchId: 'batch-f0-test', revisionId: manifest.revId, profile: manifest.profile,
+    cycleId: manifest.cycleId, contentHash: manifest.contentHashes[0], planToken: manifest.planToken,
+    prereg, preregHash: evalHashOf(await readFile(preregFile, 'utf8')), tasksHash: evalHashOf(text),
+    perTask, evaluatedAt: new Date().toISOString(),
+  })
+  const file = path.join(ctx.dir, 'evaluation.json')
+  await writeFile(file, `${JSON.stringify(report, null, 2)}\n`, 'utf8')
+  return { file, report }
 }
 
 async function plan(ctx, extra = []) {
@@ -179,18 +209,30 @@ test('apply: token/preflight/flags enforced; writes patch, backup, active and jo
     const noUnevaluated = await run(['apply', '--home', ctx.home, '--rev', planned.json.revId, '--token', planned.json.planToken, '--yes'])
     assert.equal(noUnevaluated.status, 1)
     assert.equal(noUnevaluated.json.code, 'evaluation-required')
-    const applied = await run(['apply', '--home', ctx.home, '--rev', planned.json.revId, '--token', planned.json.planToken, '--allow-unevaluated', '--yes'])
+    const forcedWithoutEnv = await run(['apply', '--home', ctx.home, '--rev', planned.json.revId, '--token', planned.json.planToken, '--allow-unevaluated', '--yes'])
+    assert.equal(forcedWithoutEnv.status, 1)
+    assert.equal(forcedWithoutEnv.json.code, 'evaluation-force-env-required')
+    const evaluation = await evaluationReport(ctx, planned)
+    const applied = await run(['apply', '--home', ctx.home, '--rev', planned.json.revId, '--token', planned.json.planToken, '--evaluation', evaluation.file, '--yes'])
     assert.equal(applied.status, 0, applied.stderr)
     assert.equal(applied.json.reload, 'restart-required')
+    assert.equal(applied.json.evaluation, 'accept')
+    assert.equal(applied.json.verdict, 'accept')
     const patch = await readFile(path.join(ctx.profileDir, 'cordis.patch.yml'), 'utf8')
     assert.match(patch, /# >>> harness2:managed/)
     assert.match(patch, /personaPrefix: You are a coding agent/)
     await stat(path.join(planned.json.dir, 'backup', 'cordis.patch.yml'))
     const active = JSON.parse(await readFile(path.join(ctx.home, 'apply', 'active.json'), 'utf8'))
     assert.equal(active.revisionId, planned.json.revId)
-    assert.equal(active.evaluation, 'not-run')
+    assert.equal(active.evaluation, 'accept')
+    assert.equal(active.verdict, 'accept')
+    assert.equal(active.evaluationReportHash, evaluation.report.reportHash)
     const journal = (await readFile(path.join(ctx.home, 'apply', 'journal.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse)
     assert.equal(journal.at(-1).kind, 'committed')
+    assert.equal(journal.at(-1).evaluation, 'accept')
+    assert.equal(journal.at(-1).batchId, 'batch-f0-test')
+    const recorded = JSON.parse(await readFile(path.join(planned.json.dir, 'manifest.json'), 'utf8'))
+    assert.equal(recorded.application.evaluationReportHash, evaluation.report.reportHash)
     const verify = await run(['verify', '--home', ctx.home, '--rev', planned.json.revId, '--cli', FAKE_CLI])
     assert.equal(verify.status, 0, verify.stderr)
     const rolled = await run(['rollback', '--home', ctx.home, '--rev', planned.json.revId])
@@ -207,7 +249,8 @@ test('rollback: modified patch requires --force; desktop profile is refused', as
   try {
     const planned = await plan(ctx)
     await run(['preflight', '--home', ctx.home, '--rev', planned.json.revId, '--cli', FAKE_CLI])
-    await run(['apply', '--home', ctx.home, '--rev', planned.json.revId, '--token', planned.json.planToken, '--allow-unevaluated', '--yes'])
+    const evaluation = await evaluationReport(ctx, planned)
+    await run(['apply', '--home', ctx.home, '--rev', planned.json.revId, '--token', planned.json.planToken, '--evaluation', evaluation.file, '--yes'])
     await writeFile(path.join(ctx.profileDir, 'cordis.patch.yml'), '# externally changed\n[]\n', 'utf8')
     const refused = await run(['rollback', '--home', ctx.home, '--rev', planned.json.revId])
     assert.equal(refused.status, 1)
@@ -229,9 +272,38 @@ test('cli: --help and the help subcommand print usage', () => {
     assert.equal(result.status, 0, `${args.join(' ')} must exit 0: ${result.stderr}`)
     assert.match(result.stdout, /harness2-apply — PR-3 offline profile-patch applier/)
     assert.match(result.stdout, /Usage:/)
-    assert.match(result.stdout, /apply --rev <rev> --token <planToken> --allow-unevaluated --yes/)
+    assert.match(result.stdout, /apply --rev <rev> --token <planToken> --evaluation <report.json> --yes/)
   }
   const unknown = run(['--not-a-command'])
   assert.equal(unknown.status, 1)
   assert.equal(unknown.json.code, 'unknown-command')
+})
+
+
+test('apply: evaluation report required; reject/mismatch/forced-escape hatch enforced', async () => {
+  const ctx = await setup()
+  try {
+    const planned = await plan(ctx)
+    await run(['preflight', '--home', ctx.home, '--rev', planned.json.revId, '--cli', FAKE_CLI])
+    // reject verdict is refused
+    const rejectedReport = await evaluationReport(ctx, planned, { accept: false })
+    const rejected = await run(['apply', '--home', ctx.home, '--rev', planned.json.revId, '--token', planned.json.planToken, '--evaluation', rejectedReport.file, '--yes'])
+    assert.equal(rejected.status, 1)
+    assert.equal(rejected.json.code, 'evaluation-rejected')
+    // report with the wrong revision is refused
+    const good = await evaluationReport(ctx, planned)
+    const tampered = { ...good.report, revisionId: 'rev-000000000000' }
+    const tamperedFile = path.join(ctx.dir, 'tampered-eval.json')
+    await writeFile(tamperedFile, JSON.stringify(tampered), 'utf8')
+    const mismatch = await run(['apply', '--home', ctx.home, '--rev', planned.json.revId, '--token', planned.json.planToken, '--evaluation', tamperedFile, '--yes'])
+    assert.equal(mismatch.status, 1)
+    assert.equal(mismatch.json.code, 'evaluation-mismatch')
+    // forced escape hatch requires the env var and records forced-unevaluated
+    const forced = await run(['apply', '--home', ctx.home, '--rev', planned.json.revId, '--token', planned.json.planToken, '--allow-unevaluated', '--yes'], { HARNESS2_ALLOW_UNEVALUATED: '1' })
+    assert.equal(forced.status, 0, forced.stderr)
+    assert.equal(forced.json.evaluation, 'forced-unevaluated')
+    const journal = (await readFile(path.join(ctx.home, 'apply', 'journal.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse)
+    assert.equal(journal.at(-1).evaluation, 'forced-unevaluated')
+    assert.equal(journal.at(-1).verdict, 'forced-unevaluated')
+  } finally { await rm(ctx.dir, { recursive: true, force: true }) }
 })

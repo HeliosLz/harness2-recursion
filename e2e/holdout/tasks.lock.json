@@ -1,0 +1,7 @@
+{
+  "schema": "harness2-holdout/v1",
+  "tasksHash": "sha256:acb4e888419bbcb48da07db48903ec2004837d79636d2c346f19e55d7da49eba",
+  "count": 36,
+  "folds": 3,
+  "perFold": 12
+}

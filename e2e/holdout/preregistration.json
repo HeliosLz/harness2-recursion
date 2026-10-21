@@ -1,0 +1,32 @@
+{
+  "schema": "harness2-prereg/v1",
+  "version": 1,
+  "date": "2026-10-21",
+  "tasksHash": "sha256:acb4e888419bbcb48da07db48903ec2004837d79636d2c346f19e55d7da49eba",
+  "tasks": "e2e/holdout/tasks.jsonl",
+  "folds": [
+    0,
+    1,
+    2
+  ],
+  "perFold": 12,
+  "arms": [
+    "C",
+    "R",
+    "I",
+    "T"
+  ],
+  "n": 12,
+  "seed": "harness2-round6-pr4",
+  "providerClass": "fake-calibration",
+  "rules": {
+    "minDelta": 0.15,
+    "maxP": 0.05,
+    "toolFailureSlack": 1,
+    "tokenRatioMax": 1.25,
+    "maxDriftDiff": 2,
+    "inertMustBeRejected": true,
+    "nullRevisionMustBeRejected": true
+  },
+  "ruleVersion": "OEP/v1"
+}

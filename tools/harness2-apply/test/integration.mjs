@@ -32,7 +32,7 @@ async function main() {
   const root = await mkdtemp(path.join(tmpdir(), 'h2-apply-integration-'))
   const home = path.join(root, 'home')
   const profile = 'pr3-int'
-  const env = { DSH_HOME: home }
+  const env = { DSH_HOME: home, HARNESS2_ALLOW_UNEVALUATED: '1' }
   try {
     run(process.execPath, [CLI, '--profile', profile, '--from-default-profile', 'headless', '--dump-config'], env)
     for (const name of ['harness2-task-recursion', 'harness2-meta-recursion']) {
@@ -58,7 +58,7 @@ async function main() {
     if (restored !== basePatch) throw new Error('rollback did not restore base patch bytes')
     console.log(JSON.stringify({
       ok: true, profile, revId: planned.revId, applyReload: applied.reload,
-      evaluation: 'not-run', restored: true,
+      evaluation: applied.evaluation, restored: true,
     }, null, 2))
   } finally {
     await rm(root, { recursive: true, force: true })

@@ -23,7 +23,9 @@
     "stage0:r6": "node e2e/stage0-r6/run.mjs",
     "stage0:r6:positive": "STAGE0R6_MODE=positive node e2e/stage0-r6/run.mjs",
     "verify:apply": "node --test tools/harness2-apply/test/applier.test.mjs",
-    "pr3:integration": "node tools/harness2-apply/test/integration.mjs"
+    "pr3:integration": "node tools/harness2-apply/test/integration.mjs",
+    "verify:eval": "node --test tools/harness2-eval/test/eval.test.mjs",
+    "pr4:integration": "node tools/harness2-eval/test/integration.mjs"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "~4.0.5",

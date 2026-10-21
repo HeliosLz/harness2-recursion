@@ -113,3 +113,11 @@ Sessions: 2 (exit 0, final answer printed)
 - 测试：`npm run verify:apply` **6/6**；`npm run verify` **50/50** 不变。
 - live 集成：`npm run pr3:integration` PASS（真实 0.2.1 CLI + 隔离 profile，persona apply 后 dump 可见，rollback 字节级恢复）。
 - 偏差：`--allow-unevaluated` 是 PR-4 前受控入口；smoke 需调用方提供；HMR 仅 pending；未改 task/meta 源码与冻结契约。
+
+## 十、Round-6 PR-4（Gate-B evaluation，2026-10-21）
+
+- 任务集 36（3×12）+ tasks lock + OEP/v1 预注册 hash；四臂 C/R/I/T（I 兼作 NULL revision 检查）；确定性 checker；配对风险差 + 精确单侧 McNemar + secondary/drift/inert 规则。
+- 报告 `harness2-eval/v1`（reportHash）+ replay；数据缺失 → inconclusive。
+- applier `apply --evaluation` 强制 accept 报告并校验 revision/hash/planToken/prereg/tasks；journal/active/manifest 记录 evaluation。
+- `--allow-unevaluated` 仅 debug：需 `HARNESS2_ALLOW_UNEVALUATED=1`，记录 forced-unevaluated。
+- 测试：`verify:eval` **6/6**、`verify:apply` **8/8**、`verify` **50/50**；`pr4:integration` 合成矩阵 PASS；真实 provider 边界见 `docs/round-6-pr4.md`。
