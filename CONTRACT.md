@@ -271,10 +271,10 @@ interface ProposeFailedPayload {
 - 只有 `set-persona-prefix` 可在 probe 内模拟（agent-scoped `systemPrompt.section({name:'deployment:persona-prefix'})`）；其余 canonical 编辑 `applicability:'unavailable'`，留待离线 applier。
 - Admissibility 白名单：`system-prompt/set-persona-{prefix,suffix}`、`tool-guidance/set-tool-order`、`plugins/{disable-row,enable-row,set-harness2-config}`；deny lexicon + 变量/形状校验；`FORBIDDEN_CONFIG_KEYS` 禁止 `metricWeights`/`gatePolicy`/路径/模型等自调裁判键。
 
-### 尚未实现的 R6-3/R6-4
+### R6-3/R6-4 实现状态（PR-5 / PR-2/3/4）
 
-- R6-3（meta 只从 evaluations 学习、旧经验 quarantine）留待 PR-5；
-- R6-4（edit body / apply / eval sidecars、offline applier）留待 PR-2/PR-3/PR-4。
+- **R6-3 已实现（PR-5）**：meta 不再从 `compose/*` 学；只从 real-provider eval 认证结果学；无 `verification` 旧条目默认 quarantine；`taskDomain:'eval-holdout'` 永不注入。PR-5.1 追加 meta **独立重算** OEP/v1（见下）。
+- **R6-4 已实现（PR-2/3/4）**：edit body / apply / eval sidecars 与 offline applier 均已落地；ledger v3、bus 4 事件、`AppliedEdit`、confidence v3 不变。
 
 ### R6-5（Gate-v4 rejection 审计语义，PR-1.2）
 
@@ -335,4 +335,10 @@ Gate-v4 的 `compose/rejected.rejectedCandidateIds` 为 **audit-complete**：列
 - Legacy quarantine：无 verification 的条目默认不进 priors/不计数（enableLegacyExperience=true 可注入但仍无 verification）；`taskDomain:'eval-holdout'` 永不注入；不删除/迁移旧文件。
 - apply state：active 的 appliedComponents seed 已应用集合；rolled-back revision/contentHash 从 priors 驱逐（保留文件审计）。
 - Config additive：`evaluationsPath`、`ledgerPath`、`applyStatePath`、`enableLegacyExperience`（默认 false）。不改 ledger v3/bus/confidence v3/`AppliedEdit`/Gate-v4/applier 强制。
-- 残余风险：providerClass 是本地自声明，非密码学证明；meta 只做轻量 verification/hash 校验，统计重算仍由 eval/applier 完成。
+- 残余风险：providerClass 是本地自声明，非密码学证明；PR-5.1 后 meta 会独立重算 OEP/v1 统计（见 R6-6），但仍无法认证 real provider 的真实性。
+
+### R6-6（PR-5.1 verification 加固）
+
+- meta 的 `evaluation-verify.ts` 使用冻结 OEP/v1 规则，从 `report.perTask` 独立重算 b/c/N/delta/p、secondary、drift、inert、mount 与 verdict，并逐项比对报告；不一致 → `verification-report-invalid`，不写经验。
+- 共享边界：applier 校验 **accepted** 报告后才 apply；meta 校验自己的 ingestion（含 rejected 报告），不信任仅自洽的 reportHash。
+- 残余信任边界：`providerClass:'real'` 是本地自声明；无签名/可信 CI 证明时，无法密码学认证报告确实来自 real provider。

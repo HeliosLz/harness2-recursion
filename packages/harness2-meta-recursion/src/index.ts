@@ -35,6 +35,7 @@ import {
   LEGACY_COMPONENT_MIGRATION,
   isComponentName,
 } from './constants.ts'
+import { reportHash as evaluationReportHash, verifyEvaluationReport } from './evaluation-verify.ts'
 
 export { COMPONENT_NAMES, LEGACY_COMPONENT_MIGRATION, isComponentName }
 export type { ComponentName } from './constants.ts'
@@ -331,19 +332,6 @@ export function scoreConfidence(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
-}
-
-/** Lightweight report hash verification (full stats are rechecked by the eval/applier tools). */
-function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value)
-  if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(',')}]`
-  const record = value as Record<string, unknown>
-  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`).join(',')}}`
-}
-
-function evaluationReportHash(report: Record<string, unknown>): string {
-  const { reportHash: _ignored, ...rest } = report
-  return `sha256:${createHash('sha256').update(stableStringify(rest), 'utf8').digest('hex')}`
 }
 
 /** Collapse control characters/whitespace and cap a failure pattern. */
@@ -1402,6 +1390,14 @@ export class Harness2ExperienceService {
       if (typeof report.reportHash !== 'string' || report.reportHash !== indexed.reportHash || report.reportHash !== evaluationReportHash(report)) {
         this.onError('verification-hash-mismatch', { batchId }); continue
       }
+      // PR-5.1: never trust report statistics just because the hash is self-consistent.
+      // Recompute OEP/v1 from perTask and require every reported statistic to match.
+      const verified = verifyEvaluationReport(report)
+      if (verified.errors.length > 0) {
+        this.onError('verification-report-invalid', { batchId, errors: verified.errors })
+        continue
+      }
+      const stats = verified.stats!
       const source = isRecord(report.source) ? report.source : undefined
       if (report.sourceMissing === true || source === undefined || typeof source.failurePattern !== 'string') {
         this.onError('verification-source-missing', { batchId }); continue
@@ -1410,10 +1406,6 @@ export class Harness2ExperienceService {
       const edit = isRecord(report.edit) ? report.edit : undefined
       if (edit === undefined || typeof edit.component !== 'string' || typeof edit.operation !== 'string'
         || typeof edit.contentHash !== 'string') { this.onError('verification-report-invalid', { batchId }); continue }
-      const b = typeof report.b === 'number' ? report.b : 0
-      const c = typeof report.c === 'number' ? report.c : 0
-      const N = typeof report.N === 'number' ? report.N : 0
-      if (N <= 0) { this.onError('verification-report-invalid', { batchId }); continue }
       const verification: ExperienceVerification = {
         schema: 'harness2-verification/v1',
         reportHash: report.reportHash,
@@ -1421,10 +1413,10 @@ export class Harness2ExperienceService {
         revisionId: typeof report.revisionId === 'string' ? report.revisionId : '',
         profile: typeof report.profile === 'string' ? report.profile : '',
         providerClass: 'real',
-        verdict,
-        b, c, N,
-        delta: (b - c) / N,
-        p: typeof report.p === 'number' ? report.p : 1,
+        verdict: stats.verdict === 'accept' ? 'accept' : 'reject',
+        b: stats.b, c: stats.c, N: stats.N,
+        delta: stats.delta,
+        p: stats.p,
         tokenCostSource: report.tokenCostSource === 'measured' ? 'measured' : 'estimated',
       }
       const entry = this.upsert({
@@ -1438,8 +1430,8 @@ export class Harness2ExperienceService {
           contentPreview: normalizeFailurePattern(source.failurePattern).slice(0, 200),
         },
         metricDelta: { successRateDelta: verification.delta, completion: verification.delta },
-        trials: N,
-        adoption: verdict === 'accept' ? 'accepted' : 'rejected',
+        trials: stats.N,
+        adoption: stats.verdict === 'accept' ? 'accepted' : 'rejected',
         tokenCostSource: verification.tokenCostSource,
         verification,
       })

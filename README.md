@@ -49,7 +49,7 @@ node e2e/round6-spike/run-spike.mjs     # 隔离 profile：persona patch → wir
 
 核心决定：拆分 **admission（会话内确定性准入）** 与 **certification（离线 held-out 认证）**；ledger 仍 v3、bus 仍 4 事件、meta 只从认证结果学习。
 
-**PR-1 / PR-1.1 / PR-1.2 已实现并验收**（`docs/round-6-pr1.md`、`docs/round-6-pr1.2.md`）：Gate-v4 admission + admissibility + **每个候选 2 个 matched controls** + persona in-probe 注入；`stage0:r6` 负向 0 applied / 0 control child，`stage0:r6:positive` 正向 **20/20 applied**、**4 controls + 2 trials/cycle**、gate `controlCount=4 && stable=true`、每 cycle 1 edit。剩余：PR-2 edit-body sidecar、PR-3 offline applier、PR-4 Gate-B harness、PR-5 meta verified-experience。
+**Round-6 全部实现并验收**：PR-1/1.1/1.2 Gate-v4 admission（admissibility + per-candidate matched controls，negative 0 applied / positive 20/20 applied、4 controls + 2 trials/cycle）；PR-2 edit-body sidecar；PR-3 offline applier（plan/preflight/apply/verify/rollback）；PR-4/4.1 Gate-B eval（pre-registered C/R/I/T、real-only apply、伪造报告拒绝）；PR-5/5.1 meta verified-experience（只从 real eval 学习、legacy quarantine、meta 独立重算 OEP/v1）。trust boundary：`providerClass` 仍是本地自声明，无密码学证明。
 
 ## 社区讨论
 
@@ -64,8 +64,8 @@ node e2e/round6-spike/run-spike.mjs     # 隔离 profile：persona patch → wir
 npm install
 npm run build        # lib/index.js + lib/index.d.ts + lib/constants.js
 npm run typecheck
-npm run verify       # task 31 + meta 14 + loader smoke 5 = 50 项
-npm run verify:meta  # PR-5 meta tests（14 项）
+npm run verify       # task 31 + meta 16 + loader smoke 5 = 52 项
+npm run verify:meta  # PR-5/5.1 meta tests（16 项）
 npm run verify:apply # PR-3/PR-4/4.1 applier tests（9 项）
 npm run verify:eval  # PR-4 Gate-B eval tests（6 项）
 npm run pr3:integration  # 可选：真实 CLI 的 isolated profile apply/rollback 集成
@@ -76,7 +76,7 @@ npm run stage0:r6:positive  # Gate-v4 live 正向验收（persona 必须被 appl
 node tools/harness2-apply/bin/harness2-apply.mjs --help  # PR-3 offline applier
 ```
 
-本次结果（2026-10-20）：`npm run verify` **47/47 pass**；typecheck/build exit 0；`npm pack --dry-run` 清单齐全；真实会话 E2E 通过（见下）。
+本次结果（2026-10-21）：`npm run verify` **52/52 pass**；typecheck/build exit 0；`npm pack --dry-run` 清单齐全；真实会话 E2E 通过（见下）。
 
 ## 第三轮新增（相对第二轮）
 

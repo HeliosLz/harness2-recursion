@@ -30,7 +30,7 @@
 
 入口契约 / Config / 监听器 / waterfall + 终止性 request-error / 触发条件 / 归约 / **第三轮 schema + R4-1 propose/failed schema** / **R4-2 rejected ids** / **R4-1 账本 revision 跳过** / pre-step 应用器 / 端到端 applied cycle / observe-only+同 cycleId 互斥 / **账本失败（probe + propose/failed 两种）** / **静态红线 + constants 一致性 + 事件白名单（含 propose/failed）** / `tsc --noEmit`。
 
-### `harness2-meta-recursion` — 14/14 pass
+### `harness2-meta-recursion` — 16/16 pass（PR-5.1 后）
 
 入口 / Config / **四监听（含 propose/failed）** / 静态红线 + constants 一致性 / confidence v3 / **加载 sourcePenalty + migratedFrom 作用域** / query 双阈值契约 / 写入策略（edit 来自事实）/ 带符号 delta / Q2 反射校验 / 淘汰 / 持久化 / R3-7 迁移 / **真实监听器集成 + propose/failed 诊断不写库** / `tsc --noEmit`。
 
@@ -90,12 +90,12 @@ Sessions: 2 (exit 0, final answer printed)
 ## 七、Round-6 PR-1（Gate-v4 admission，2026-10-20）
 
 - 实现：admissibility predicate + Gate-v4（2 个真实 recovery control、deadband、token guard、fail-closed）+ persona in-probe 注入 + canonical PROPOSE_SYSTEM。
-- 自动化：`npm run verify` **47/47**；归档 Stage-0 replay **v3 20/20 → v4 0/20**（无 control 的旧 payload 全部 `low-evidence`，无静默回退）。
+- 自动化（当时）：`npm run verify` **47/47**；归档 Stage-0 replay **v3 20/20 → v4 0/20**（无 control 的旧 payload 全部 `low-evidence`，无静默回退）。
 - Live 负向 `npm run stage0:r6`：**PASS**，20 cycles，**0 applied** / 20 rejected；候选全部不可模拟，按设计不创建 controls（controlCount=0），receipt 与 payload 一致。
 - Live 正向 `npm run stage0:r6:positive`：**PASS**，**20/20 applied**，每 cycle 恰 1 canonical persona edit，probe 120（**per-candidate 4 controls + 2 trials**），gate `controlCount=4 && stable=true`，receipts 20/20。
 - 经 interrogate adversarial review 修复 Act 1–5，并在 PR-1.1 处理 Consider：matched control arm、禁止 judge/budget 键、receipt 深度一致、失败诊断/短路、raw 校验、prompt 承诺修正；详见 `docs/round-6-pr1.md` §6。
 - 证据：[`docs/round-6-pr1.md`](docs/round-6-pr1.md)、[`e2e/stage0-r6/RESULTS.md`](e2e/stage0-r6/RESULTS.md)。
-- 仍待：PR-2 edit-body sidecar、PR-3 offline applier、PR-4 Gate-B harness、PR-5 meta verified-experience（当前 meta 仍消费 compose 决策）。
+- 后续 PR-2/3/4/5 均已完成（见下文各节；PR-5.1 追加 meta 独立重算）。
 
 - **PR-1.2（2026-10-20）**：per-candidate matched controls、control 失败不重试、receipt/validator 一致性、observe-only 只取证、pre-injection applicability 修复、Q3 v4 audit-complete 修订；`verify` 47/47，live 正/负向 PASS。见 [`docs/round-6-pr1.2.md`](docs/round-6-pr1.2.md)。
 
@@ -135,4 +135,10 @@ Sessions: 2 (exit 0, final answer printed)
 - verification schema additive；trials=N、observedIn=eval:<batch>、failurePattern 来自原始 probe source；同 reportHash 幂等；fake/inconclusive/hash/source 缺失不写。
 - legacy 无 verification 默认 quarantine（enableLegacyExperience=true 才注入）；eval-holdout 永不注入；旧文件不迁移。
 - active appliedComponents seed；rolled-back revision/contentHash 从 priors 驱逐。
-- 测试：verify:meta **14/14**、verify **50/50**、verify:apply **9/9**、verify:eval **6/6**；pr3/pr4 integration、stage0 三 harness PASS。
+- 测试：verify:meta **16/16**（PR-5.1 后）、verify **52/52**、verify:apply **9/9**、verify:eval **6/6**；pr3/pr4 integration、stage0 三 harness PASS。
+
+## 十三、Round-6 PR-5.1（meta 独立重算，2026-10-21）
+
+- 新增 `evaluation-verify.ts`：从 perTask 独立重算 OEP/v1（b/c/N/delta/p/secondary/drift/inert/verdict），逐项比对报告；伪造/损坏报告 → `verification-report-invalid`，不写经验。
+- `verify:meta` **16/16**；`verify` **52/52**（task 31 + meta 16 + loader 5）。
+- 残余信任边界：`providerClass:'real'` 仍是本地自声明，需未来签名/可信 CI 才能密码学认证。

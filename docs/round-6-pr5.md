@@ -54,12 +54,18 @@ compose/applied 与 compose/rejected 只作诊断：meta 保留监听与 `record
 
 ## 7. 测试与验收
 
-- `npm run verify:meta`：14/14
-- `npm run verify`：50/50（task 31 + meta 14 + loader 5）
+- `npm run verify:meta`：16/16（PR-5.1 后）
+- `npm run verify`：52/52（task 31 + meta 16 + loader 5）
 - `verify:apply` 9/9、`verify:eval` 6/6
 - pr3/pr4 integration、stage0 v3 20/20、stage0:r6 正/负向 PASS（最终报告附输出）
 
-## 8. 边界与残余风险
+## 8. PR-5.1 附加（2026-10-21）
+
+- meta 新增 `evaluation-verify.ts`：从 `perTask` 独立重算 OEP/v1 并逐项比对报告；伪造/损坏统计 → 拒绝。
+- `verify:meta` 16/16；新增 forged-report 与 accept/reject 重算测试。
+- 详见 [`round-6-pr5.1.md`](round-6-pr5.1.md)。
+
+## 9. 边界与残余风险
 
 - providerClass 仍是本地自声明：不能密码学证明报告确实来自真实 provider；PR-4.1 的 hash/统计重算只能防篡改，不能防伪造“real”标签。生产上需操作者信任边界/未来签名。
 - eval real runner 的 token/step 是近似估计；不足以作为精细效能证据。

@@ -80,7 +80,7 @@ elapsed: 116.7s
 
 | 检查 | 结果 |
 | :-- | :-- |
-| `npm run verify` | **47/47** |
+| `npm run verify` | **52/52**（PR-5.1 后） |
 | `npm run stage0`（v3 归档） | PASS，NULL/ADVERSARIAL 20/20（v3 未变） |
 | `npm run stage0:r6`（负向） | PASS：0 applied / 20 rejected；候选不可模拟 → **0 probe child**；gate `controlCount=0 && stable=false` |
 | `npm run stage0:r6:positive`（正向） | PASS：20/20 applied；**每候选 2 matched controls + 1 treatment**（probe 120）；gate `controlCount=4 && stable=true`；每 cycle 1 edit |

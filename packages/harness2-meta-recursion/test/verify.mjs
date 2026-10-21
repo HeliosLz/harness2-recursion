@@ -8,7 +8,11 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const repoRoot = path.resolve(packageRoot, '..', '..')
 const plugin = await import(path.join(packageRoot, 'src', 'index.ts'))
+const evalVerify = await import(path.join(repoRoot, 'tools', 'harness2-eval', 'src', 'verify.mjs'))
+const HOLDOUT_TASKS = path.join(repoRoot, 'e2e', 'holdout', 'tasks.jsonl')
+const HOLDOUT_PREREG = path.join(repoRoot, 'e2e', 'holdout', 'preregistration.json')
 
 const sha = (value) => createHash('sha256').update(value, 'utf8').digest('hex')
 const hashOf = (value) => `sha256:${sha(value)}`
@@ -43,21 +47,37 @@ function legacyEntry(overrides = {}) {
   }
 }
 
-async function makeVerificationFixture(dir, { providerClass = 'real', verdict = 'accept', source = { taskId: 'source-task', cycleId: 'c1', failurePattern: 'command failed', taskDomain: 'repo-fix' }, sourceMissing = false, hashValid = true, reportHashOverride = undefined } = {}) {
+async function makeVerificationFixture(dir, { providerClass = 'real', verdict = 'accept', source = { taskId: 'source-task', cycleId: 'c1', failurePattern: 'command failed', taskDomain: 'repo-fix' }, sourceMissing = false, hashValid = true, reportHashOverride = undefined, mutate = undefined } = {}) {
   const batchId = `batch-${Math.random().toString(16).slice(2, 8)}`
   const revisionId = 'rev-3aa3b56f7f5f'
-  const report = {
-    schema: 'harness2-eval/v1', batchId, revisionId, profile: 'isolated', cycleId: 'c1',
+  const prereg = await evalVerify.loadPrereg(HOLDOUT_PREREG)
+  const { tasks, text } = await evalVerify.loadTasks(HOLDOUT_TASKS)
+  const batch = tasks.filter((task) => task.fold === 0)
+  const perTask = batch.map((task, index) => {
+    const control = verdict === 'accept' ? false : true
+    return {
+      taskId: task.id,
+      arms: {
+        C: { success: control, toolFailures: 1, stepCount: 2, tokenCost: 1000, durationMs: 10, mountFailed: false, schemaFailed: false },
+        R: { success: control, toolFailures: 1, stepCount: 2, tokenCost: 1000, durationMs: 10, mountFailed: false, schemaFailed: false },
+        I: { success: false, toolFailures: 1, stepCount: 2, tokenCost: 1000, durationMs: 10, mountFailed: false, schemaFailed: false },
+        T: { success: verdict === 'accept' ? index < 10 : false, toolFailures: 1, stepCount: 2, tokenCost: 1000, durationMs: 10, mountFailed: false, schemaFailed: false },
+      },
+    }
+  })
+  const report = evalVerify.buildReport({
+    batchId, revisionId, profile: 'isolated', cycleId: 'c1',
     contentHash: 'sha256:' + 'a'.repeat(64), planToken: 'sha256:' + 'c'.repeat(64),
-    preregHash: 'sha256:' + 'd'.repeat(64), tasksHash: 'sha256:' + 'e'.repeat(64),
-    evaluatedAt: new Date().toISOString(), providerClass, fold: 0, arms: ['C', 'R', 'I', 'T'], perTask: [],
-    b: 10, c: 0, N: 12, delta: 10 / 12, p: 0.001, secondary: {}, drift: {}, inert: {},
-    inertControlRejected: true, nullProxyRejected: true, mountSchemaFailures: 0, verdict,
-    edit: { candidateId: 'cand-1', component: 'system-prompt', operation: 'set-persona-prefix', contentHash: 'sha256:' + 'a'.repeat(64) },
-    ...(sourceMissing ? { sourceMissing: true } : { source }),
-    tokenCostSource: 'measured',
-  }
-  report.reportHash = reportHashOf(report)
+    prereg, preregHash: evalVerify.hashOf(await readFile(HOLDOUT_PREREG, 'utf8')),
+    tasksHash: evalVerify.hashOf(text), perTask, fold: 0, evaluatedAt: new Date().toISOString(),
+  })
+  report.providerClass = providerClass
+  report.edit = { candidateId: 'cand-1', component: 'system-prompt', operation: 'set-persona-prefix', contentHash: 'sha256:' + 'a'.repeat(64) }
+  report.tokenCostSource = 'measured'
+  if (sourceMissing) report.sourceMissing = true
+  else report.source = source
+  if (mutate !== undefined) mutate(report)
+  report.reportHash = evalVerify.reportHash(report)
   const indexDir = path.join(dir, 'eval')
   await mkdir(indexDir, { recursive: true })
   const reportPath = path.join(indexDir, `${batchId}.json`)
@@ -66,7 +86,7 @@ async function makeVerificationFixture(dir, { providerClass = 'real', verdict = 
   const index = path.join(indexDir, 'index.jsonl')
   await writeFile(index, `${JSON.stringify({
     schema: 'harness2-eval-index/v1', batchId, revisionId, reportPath: path.basename(reportPath),
-    reportHash: indexedHash, providerClass, verdict, fold: 0, createdAt: new Date().toISOString(),
+    reportHash: indexedHash, providerClass, verdict: report.verdict, fold: 0, createdAt: new Date().toISOString(),
   })}\n`, 'utf8')
   return { index, reportPath, batchId, revisionId, report }
 }
@@ -278,4 +298,40 @@ test('14. facade remains two-key frozen and queryPriors stays sync read-only', a
     assert.deepEqual(result, { priors: [], totalMatched: 0 })
     assert.equal(typeof facade.queryPriors({ failureSignature: { toolName: 'bash' } }).then, 'undefined')
   } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+
+test('15. forged report statistics are rejected by the independent verifier', async () => {
+  for (const mutate of [
+    (report) => { report.b = 0; report.delta = 0 },
+    (report) => { report.p = 0.5 },
+    (report) => { report.verdict = 'accept'; report.inertControlRejected = false },
+    (report) => { report.perTask = [] },
+  ]) {
+    const dir = await mkdtemp(path.join(tmpdir(), 'h2-meta-forged-'))
+    try {
+      await makeVerificationFixture(dir, { mutate })
+      const service = await serviceAt(dir)
+      assert.equal(service.queryPriors({ failureSignature: { messagePattern: 'command failed' } }).totalMatched, 0)
+      assert.equal((await readFile(path.join(dir, 'EXPERIENCE.md'), 'utf8').catch(() => '')).trim(), '')
+    } finally { await rm(dir, { recursive: true, force: true }) }
+  }
+})
+
+test('16. verifier recomputes OEP/v1 (accept and reject) from perTask', async () => {
+  const acceptDir = await mkdtemp(path.join(tmpdir(), 'h2-meta-verify-a-'))
+  const rejectDir = await mkdtemp(path.join(tmpdir(), 'h2-meta-verify-r-'))
+  try {
+    const accept = await makeVerificationFixture(acceptDir)
+    assert.equal(accept.report.verdict, 'accept')
+    assert.equal(accept.report.b, 10)
+    assert.equal(accept.report.c, 0)
+    const reject = await makeVerificationFixture(rejectDir, { verdict: 'reject' })
+    assert.equal(reject.report.verdict, 'reject')
+    assert.equal(reject.report.b, 0)
+    assert.equal(reject.report.c, 12)
+  } finally {
+    await rm(acceptDir, { recursive: true, force: true })
+    await rm(rejectDir, { recursive: true, force: true })
+  }
 })

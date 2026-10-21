@@ -21,6 +21,8 @@
     "lib/index.d.ts",
     "lib/constants.d.ts",
     "lib/constants.js",
+    "lib/evaluation-verify.js",
+    "lib/evaluation-verify.d.ts",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
