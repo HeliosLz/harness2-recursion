@@ -106,3 +106,10 @@ Sessions: 2 (exit 0, final answer printed)
 - GC 仅删除过期未引用 hex body，错误不抛出；legacy ledger 无 body → `legacy-no-body`；
 - 测试 28/29/30（任务包 31、总 50/50）；live 正/负向均 PASS，正/负向各有 2 个唯一 body 且所有引用 hash 均存在。
 - 偏差：内容寻址使“40 个物理 body”不可满足（实际 2 个唯一 body / 40 引用），详见 `docs/round-6-pr2.md`。
+
+## 九、Round-6 PR-3（offline profile-patch applier，2026-10-21）
+
+- 独立工具 `tools/harness2-apply/`：plan → preflight（隔离 profile dump/smoke）→ apply（token/preflight/--allow-unevaluated/--yes，备份+锁+原子写+readback）→ verify → rollback（hash 保护、字节恢复、幂等）；journal/revindex/active sidecar。
+- 测试：`npm run verify:apply` **6/6**；`npm run verify` **50/50** 不变。
+- live 集成：`npm run pr3:integration` PASS（真实 0.2.1 CLI + 隔离 profile，persona apply 后 dump 可见，rollback 字节级恢复）。
+- 偏差：`--allow-unevaluated` 是 PR-4 前受控入口；smoke 需调用方提供；HMR 仅 pending；未改 task/meta 源码与冻结契约。

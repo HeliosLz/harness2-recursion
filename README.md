@@ -65,9 +65,12 @@ npm install
 npm run build        # lib/index.js + lib/index.d.ts + lib/constants.js
 npm run typecheck
 npm run verify       # task 31 + meta 14 + loader smoke 5 = 50 项
+npm run verify:apply # PR-3 applier tests（6 项）
+npm run pr3:integration  # 可选：真实 CLI 的 isolated profile apply/rollback 集成
 npm run stage0       # Stage-0 证伪闸门（v3 复现，真实 pipeline，约 110s）
 npm run stage0:r6    # Gate-v4 live 负向验收（20 cycles，约 2 分钟）
 npm run stage0:r6:positive  # Gate-v4 live 正向验收（persona 必须被 applied）
+node tools/harness2-apply/bin/harness2-apply.mjs --help  # PR-3 offline applier
 ```
 
 本次结果（2026-10-20）：`npm run verify` **47/47 pass**；typecheck/build exit 0；`npm pack --dry-run` 清单齐全；真实会话 E2E 通过（见下）。

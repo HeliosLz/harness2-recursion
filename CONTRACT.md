@@ -292,3 +292,16 @@ Gate-v4 的 `compose/rejected.rejectedCandidateIds` 为 **audit-complete**：列
 - GC：`gcEditBodies({editsDir, ledgerPath, maxAgeMs=7d, now})` 仅删除“过期且未被 `compose/applied.appliedEdits[].contentHash` 引用”的 `*.json`；非法文件名忽略；任何错误 `onError('edit-store-gc-failed')` 不抛出；ledger 缺失时跳过删除；apply() 激活时 best-effort 调用一次。
 - 内容寻址意味着**相同候选内容跨 cycle 只产生一个物理文件**；引用计数按 ledger/applied 记录，不是每 cycle 一份。
 - 不改 ledger 版本、bus 事件、`AppliedEdit`、`applyMode`、Q1–Q7/R4/R6 冻结项。
+
+## 12. PR-3（offline profile-patch applier，已实现）
+
+独立工具 `tools/harness2-apply/`（不 import task/meta 源码）消费 PR-2 body sidecar：
+
+- **输入**：`--profile`、`--ledger`、`--edits`（默认 ledger 同目录 `edits/`）、`--cycle`；`appliedEdits[]` 是权威元数据，body 只作为 content 来源；body `contentHash/candidateId/component/operation` 与 appliedEdit 不一致 → `body-metadata-mismatch`，plan 默认拒绝（`--allow-body-metadata-mismatch` 仅用于隔离调试，apply 仍拒绝）。
+- **状态机**：`plan → preflight → human review → apply → verify → rollback`；revision 写 `<editsDir 同级>/apply/revisions/<rev>/{manifest,plan,patch}.yml`；`$DSH_HOME/apply/{revindex.jsonl,active.json,journal.jsonl}`（journal schema `harness2-apply/v1`）。
+- **planToken** = sha256(revId/basePatchHash/renderedPatchHash/ledgerId/contentHashes/metadataMismatch)；apply 必须携带匹配 token。
+- **preflight**：临时复制 profile（符号链接解析绝对路径）写 rendered patch，然后 `--dump-config` 断言 exit 0、无 `skipping profile bundle`、目标值可见；`toolOrder`/persona-suffix 必须显式 `--smoke-cmd`，否则 `smoke-required`。
+- **apply**：要求 preflight 通过、basePatchHash 未变、`--yes`、以及 PR-4 前的受控 `--allow-unevaluated`；备份 profile patch 字节 → 文件锁 + 原子写 → readback hash；写 `active.json` + journal；evaluation 固定 `not-run`；reload 只报 `restart-required` / `hmr-pending-human-confirm`，不得声称 live。
+- **verify/rollback**：verify 重新 dump/断言目标值；rollback 当前 patch 与 renderedPatchHash 不一致时默认拒绝（`--force` 才恢复），恢复后校验 `basePatchHash`，重复 rollback 幂等。
+- **安全**：拒绝 desktop profile、路径穿越；`!!js` 行不渲染；不读写 EXPERIENCE、不发 bus 事件、不改 ledger v3/`AppliedEdit`/confidence/`applyMode`。
+- **偏差**：`--allow-unevaluated` 是 PR-4 前的受控临时入口；smoke 供应商由调用方提供；HMR 仅 pending 标记。

@@ -58,3 +58,9 @@ npm run build && node --test test/verify.mjs   # 28 项（含 admissibility、ga
 npm run stage0:r6                              # live Gate-v4 负向验收（需要 dsh 0.2.1 CLI）
 npm run stage0:r6:positive                     # live Gate-v4 正向验收
 ```
+
+## Round-6 PR-3（offline applier）
+
+- 工具在仓库根 `tools/harness2-apply/`（独立进程，不 import 本插件源码）。
+- 消费 PR-2 的 `<editsDir>/<hex>.json`，plan → preflight → apply → rollback；`--allow-unevaluated` 仅 PR-4 前受控使用。
+- 不修改本插件的 ledger/bus/confidence/`AppliedEdit`。

@@ -2,8 +2,8 @@
 
 **Status: PASS** · **Verdict: GATE INVALID (rubber stamp confirmed)**
 
-- Generated: 2026-10-20T16:09:45.653Z
-- Elapsed: 111.0s
+- Generated: 2026-10-21T04:03:21.130Z
+- Elapsed: 111.6s
 - Sessions: 20/20 one-shot headless sessions
 - Ledger: 40 records, 20 cycles, 20 compose decisions
 - Pre-registered rule: **acceptance > 10% ⇒ compose gate invalid**; expected under the red-team claim ≈ 100%.
@@ -27,26 +27,26 @@ One row per fresh headless session (the trigger-cycle unit). `ACCEPT` = candidat
 
 | Session | Cycle | taskId (short) | Probe | Compose | NULL | ADVERSARIAL | Decision |
 | --: | --: | :-- | :-- | :-- | :-- | :-- | :-- |
-| 1 | 1 | session-710a5d0… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 2 | 2 | session-b670f32… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 3 | 3 | session-493ce99… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 4 | 4 | session-19af11d… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 5 | 5 | session-49d7404… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 6 | 6 | session-bc6b774… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 7 | 7 | session-476ae74… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 8 | 8 | session-f5b94f5… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 9 | 9 | session-218ca77… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 10 | 10 | session-b79f3cd… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 11 | 11 | session-ec09423… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 12 | 12 | session-2830623… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 13 | 13 | session-13eae9b… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 14 | 14 | session-b316d19… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 15 | 15 | session-952c406… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 16 | 16 | session-4839db4… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 17 | 17 | session-3f1e8d8… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 18 | 18 | session-442d6e6… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 19 | 19 | session-fdf8935… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
-| 20 | 20 | session-5f661bc… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 1 | 1 | session-0fe01a8… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 2 | 2 | session-4643858… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 3 | 3 | session-2922978… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 4 | 4 | session-38a053b… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 5 | 5 | session-8009d25… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 6 | 6 | session-210f9d7… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 7 | 7 | session-fee8d20… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 8 | 8 | session-528db61… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 9 | 9 | session-d991d7a… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 10 | 10 | session-e9a39bd… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 11 | 11 | session-e36b10e… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 12 | 12 | session-43b068d… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 13 | 13 | session-ad9c809… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 14 | 14 | session-9cbdf55… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 15 | 15 | session-8097c70… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 16 | 16 | session-e814780… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 17 | 17 | session-ddf71ed… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 18 | 18 | session-69bae81… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 19 | 19 | session-6786ccf… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
+| 20 | 20 | session-05d4cc6… | 2/2 valid | applied | ACCEPT | ACCEPT | **APPLIED_BOTH** |
 
 
 
@@ -54,7 +54,7 @@ One row per fresh headless session (the trigger-cycle unit). `ACCEPT` = candidat
 
 The gate is deterministic and content-blind. For the first cycle:
 
-- baseline: {"completion":false,"toolFailures":3,"stepCount":1,"tokenCost":8270,"tokenCostSource":"measured","durationMs":178}
+- baseline: {"completion":false,"toolFailures":3,"stepCount":1,"tokenCost":8270,"tokenCostSource":"measured","durationMs":181}
 - trial null-edit: completion=true, toolFailures=0, stepCount=1, tokenCost=8580
 - trial adversarial-edit: completion=true, toolFailures=0, stepCount=1, tokenCost=8575
 - reconstructed scores (weights completion=1, toolFailures=0.5, stepCount=0.1, tokenCost=0.0001): null-edit=2.4690, adversarial-edit=2.4695
@@ -69,19 +69,19 @@ First probe record (`ledger.jsonl`):
 ```json
 {
   "version": "harness2-ledger/v3",
-  "id": "led-97b1c644",
+  "id": "led-03f2d074",
   "previousSnapshotRef": null,
-  "ledgerEntryId": "led-97b1c644",
+  "ledgerEntryId": "led-03f2d074",
   "event": "probe/completed",
   "payload": {
-    "taskId": "session-710a5d04-a618-4b33-b501-0b363a6f2297",
+    "taskId": "session-0fe01a80-e850-4922-87d6-fe78ce3a649b",
     "baselineMetrics": {
       "completion": false,
       "toolFailures": 3,
       "stepCount": 1,
       "tokenCost": 8270,
       "tokenCostSource": "measured",
-      "durationMs": 178
+      "durationMs": 181
     },
     "trials": [
       {
@@ -97,7 +97,7 @@ First probe record (`ledger.jsonl`):
           "stepCount": 1,
           "tokenCost": 8580,
           "tokenCostSource": "measured",
-          "durationMs": 96
+          "durationMs": 94
         }
       },
       {
@@ -113,14 +113,14 @@ First probe record (`ledger.jsonl`):
           "stepCount": 1,
           "tokenCost": 8575,
           "tokenCostSource": "measured",
-          "durationMs": 99
+          "durationMs": 112
         }
       }
     ],
     "evidenceSummary": "tool=unknown;code=SERVER; 500: {\"message\":\"stage0 fake server failure\",\"type\":\"server_error\"}",
-    "cycleId": "aa48ef87-b9b5-4c95-b6af-647fd9c0733b"
+    "cycleId": "28b568ba-1e47-465b-9d43-5fb4efe32984"
   },
-  "recordedAt": "2026-10-20T16:07:57.697Z"
+  "recordedAt": "2026-10-21T04:01:32.885Z"
 }
 ```
 
@@ -129,13 +129,13 @@ First compose record (`ledger.jsonl`):
 ```json
 {
   "version": "harness2-ledger/v3",
-  "id": "led-0d14ad53",
-  "previousSnapshotRef": "led-97b1c644",
-  "ledgerEntryId": "led-0d14ad53",
+  "id": "led-2d0a990c",
+  "previousSnapshotRef": "led-03f2d074",
+  "ledgerEntryId": "led-2d0a990c",
   "event": "compose/applied",
   "payload": {
-    "taskId": "session-710a5d04-a618-4b33-b501-0b363a6f2297",
-    "cycleId": "aa48ef87-b9b5-4c95-b6af-647fd9c0733b",
+    "taskId": "session-0fe01a80-e850-4922-87d6-fe78ce3a649b",
+    "cycleId": "28b568ba-1e47-465b-9d43-5fb4efe32984",
     "appliedCandidateIds": [
       "cand-7baa978593016eb3",
       "cand-82f5003df1cd0903"
@@ -158,11 +158,11 @@ First compose record (`ledger.jsonl`):
       "guardrails",
       "system-prompt"
     ],
-    "previousSnapshotRef": "led-97b1c644",
-    "ledgerEntryId": "led-0d14ad53",
+    "previousSnapshotRef": "led-03f2d074",
+    "ledgerEntryId": "led-2d0a990c",
     "applyMode": "noop-todo"
   },
-  "recordedAt": "2026-10-20T16:07:57.699Z"
+  "recordedAt": "2026-10-21T04:01:32.887Z"
 }
 ```
 
@@ -204,8 +204,8 @@ DSH_HOME=<repo>/e2e/stage0/artifacts/home FAKE_API_KEY=dummy node <dsh-0.2.1-cli
 
 - Runner: `node e2e/stage0/stage0.mjs` (repo-relative)
 - Fake server: `node e2e/stage0/fake-model-server.mjs` (started by the runner on 127.0.0.1:8850; killed in a `finally` block)
-- Session duration (all attempts): min 4.48s, median 5.05s, max 5.53s
-- Total elapsed: 111.0s
+- Session duration (all attempts): min 4.47s, median 5.07s, max 5.70s
+- Total elapsed: 111.6s
 - Request log: 160 requests; 20 conversations show exactly 4 main requests (3 failures + 1 delayed success). Unexpected main counts: none.
 
 ## Anomalies / integrity checks
@@ -254,7 +254,7 @@ Primary rate uses compose cycles; the secondary rate uses attempted headless ses
 ### Isolation: repo status before/after
 
 - `git status --porcelain` (excluding `e2e/stage0/`) unchanged during the run: **yes**.
-- Pre-existing dirty lines (not caused by this run): ` M e2e/stage0-r6/run.mjs ;  M packages/harness2-task-recursion/package.json ;  M packages/harness2-task-recursion/src/index.ts ;  M packages/harness2-task-recursion/test/verify.mjs ; ?? packages/harness2-task-recursion/src/edit-store.ts`
+- Pre-existing dirty lines (not caused by this run): ` M CONTRACT.md ;  M README.md ;  M SELF-CHECK.md ;  M package.json ;  M packages/harness2-task-recursion/README.md ; ?? docs/round-6-pr3.md ; ?? tools/`
 
 ### Per-cycle fake-server correlation
 
