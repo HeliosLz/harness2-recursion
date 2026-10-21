@@ -228,7 +228,9 @@ export function evaluateVerdict({ perTask, prereg }) {
 
 export function buildReport({
   batchId, revisionId, profile, cycleId, contentHash, planToken,
-  prereg, preregHash, tasksHash, perTask, fold, evaluatedAt = new Date().toISOString(),
+  prereg, preregHash, tasksHash, perTask, fold,
+  edit, source, sourceMissing, tokenCostSource,
+  evaluatedAt = new Date().toISOString(),
 }) {
   const stats = evaluateVerdict({ perTask, prereg })
   const report = {
@@ -238,6 +240,10 @@ export function buildReport({
     providerClass: prereg.providerClass,
     fold: fold ?? prereg.folds?.[0],
     arms: [...ARMS], perTask, ...stats,
+    ...(edit === undefined ? {} : { edit }),
+    ...(source === undefined ? {} : { source }),
+    ...(sourceMissing === true ? { sourceMissing: true } : {}),
+    ...(tokenCostSource === undefined ? {} : { tokenCostSource }),
   }
   report.reportHash = reportHash(report)
   return report
@@ -250,13 +256,30 @@ export const REPORT_KEYS = Object.freeze([
   'nullProxyRejected', 'mountSchemaFailures', 'verdict', 'reportHash',
 ])
 const ARM_RESULT_KEYS = ['success', 'toolFailures', 'stepCount', 'tokenCost', 'durationMs', 'mountFailed', 'schemaFailed']
+const OPTIONAL_REPORT_KEYS = ['edit', 'source', 'sourceMissing', 'tokenCostSource']
 
 export function validateReport(report, { prereg, tasksHash, preregHash } = {}) {
   const errors = []
   if (report === null || typeof report !== 'object' || Array.isArray(report)) return ['report must be an object']
   const keys = Object.keys(report)
-  if (keys.length !== REPORT_KEYS.length || REPORT_KEYS.some((key) => !Object.hasOwn(report, key))) {
-    errors.push('report has an unexpected field set')
+  const unexpected = keys.filter((key) => !REPORT_KEYS.includes(key) && !OPTIONAL_REPORT_KEYS.includes(key))
+  const missing = REPORT_KEYS.filter((key) => !Object.hasOwn(report, key))
+  if (missing.length > 0 || unexpected.length > 0) errors.push('report has an unexpected field set')
+  if (report.edit !== undefined) {
+    const edit = report.edit
+    if (edit === null || typeof edit !== 'object' || Array.isArray(edit)) errors.push('edit must be an object')
+    else for (const key of ['candidateId', 'component', 'operation', 'contentHash']) {
+      if (typeof edit[key] !== 'string' || edit[key].length === 0) errors.push(`edit.${key} is required`)
+    }
+  }
+  if (report.sourceMissing !== undefined && typeof report.sourceMissing !== 'boolean') errors.push('sourceMissing must be boolean')
+  if (report.source !== undefined) {
+    const source = report.source
+    if (source === null || typeof source !== 'object' || Array.isArray(source)) errors.push('source must be an object')
+    else if (typeof source.failurePattern !== 'string' || source.failurePattern.length === 0) errors.push('source.failurePattern is required')
+  }
+  if (report.tokenCostSource !== undefined && report.tokenCostSource !== 'measured' && report.tokenCostSource !== 'estimated') {
+    errors.push('tokenCostSource must be measured | estimated')
   }
   if (report.schema !== EVAL_SCHEMA) errors.push('schema must be harness2-eval/v1')
   if (report.providerClass !== 'fake-calibration' && report.providerClass !== 'real') {
@@ -419,6 +442,7 @@ export async function realRunner(options) {
 export async function runBatch({
   revisionId, profile, cycleId, contentHash, planToken, prereg,
   batch, tasksHash, preregHash, runner, batchId, evaluatedAt,
+  edit, source, sourceMissing, tokenCostSource,
 }) {
   const order = ARMS
   const perTask = []
@@ -444,6 +468,7 @@ export async function runBatch({
     report: buildReport({
       batchId, revisionId, profile, cycleId, contentHash, planToken,
       prereg, preregHash, tasksHash, perTask, fold: batch[0]?.fold, evaluatedAt,
+      edit, source, sourceMissing, tokenCostSource,
     }),
     runs,
     order,

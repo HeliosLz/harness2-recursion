@@ -56,6 +56,14 @@ export const Config = Schema.object({
   minNegativeConfidenceToInject: Schema.number().default(0.3),
   enableNegativeExperience: Schema.boolean().default(true),
   llmReflectionModel: Schema.string().default(''),
+  /** PR-5: verified-evaluation index (empty derives <ledger dir>/eval/index.jsonl). */
+  evaluationsPath: Schema.string().default(''),
+  /** PR-5: ledger used for provenance (kept for compatibility/diagnostics). */
+  ledgerPath: Schema.string().default('./harness2-ledger.jsonl'),
+  /** PR-5: offline applier active state (empty derives <DSH_HOME>/apply/active.json). */
+  applyStatePath: Schema.string().default(''),
+  /** PR-5: legacy entries without `verification` are quarantined by default. */
+  enableLegacyExperience: Schema.boolean().default(false),
 })
 
 /** Resolved config type, identical to the schema output. */
@@ -183,6 +191,24 @@ export interface PriorsQuery {
  *   load with the Q4 penalty (`measured` vs `estimated`);
  * - `migratedFrom` is an optional audit field for legacy component names.
  */
+export interface ExperienceVerification {
+  readonly schema: 'harness2-verification/v1'
+  readonly reportHash: string
+  readonly batchId: string
+  readonly revisionId: string
+  readonly profile: string
+  readonly providerClass: 'real'
+  readonly verdict: 'accept' | 'reject'
+  readonly b: number
+  readonly c: number
+  readonly N: number
+  readonly delta: number
+  readonly p: number
+  readonly tokenCostSource: 'measured' | 'estimated'
+  /** True when the original composed source could not be recovered. */
+  readonly sourceMissing?: boolean
+}
+
 export interface ExperienceEntry {
   readonly id: string
   readonly condition: {
@@ -205,6 +231,8 @@ export interface ExperienceEntry {
   readonly confidence: number
   /** Present only when a legacy component name was migrated on load. */
   readonly migratedFrom?: string
+  /** PR-5: only real-provider verified evaluations create/qualify entries. */
+  readonly verification?: ExperienceVerification
 }
 
 export interface PriorsResult {
@@ -245,6 +273,19 @@ export function resolveStoragePath(configuredPath: string): string {
   const home = process.env.DSH_HOME?.trim()
   const base = home !== undefined && home.length > 0 ? path.join(home, 'harness2') : process.cwd()
   return path.resolve(base, value.length > 0 ? value : 'EXPERIENCE.md')
+}
+
+export function resolveEvaluationsPath(configuredPath: string, ledgerPath: string): string {
+  const value = configuredPath.trim()
+  if (value.length > 0) return resolveStoragePath(value)
+  return path.join(path.dirname(resolveStoragePath(ledgerPath)), 'eval', 'index.jsonl')
+}
+
+export function resolveApplyStatePath(configuredPath: string): string {
+  const value = configuredPath.trim()
+  if (value.length > 0) return resolveStoragePath(value)
+  const home = process.env.DSH_HOME?.trim()
+  return path.resolve(home !== undefined && home.length > 0 ? home : process.cwd(), 'apply', 'active.json')
 }
 
 /* -------------------------------------------------------------------------- */
@@ -290,6 +331,19 @@ export function scoreConfidence(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+/** Lightweight report hash verification (full stats are rechecked by the eval/applier tools). */
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(',')}]`
+  const record = value as Record<string, unknown>
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`).join(',')}}`
+}
+
+function evaluationReportHash(report: Record<string, unknown>): string {
+  const { reportHash: _ignored, ...rest } = report
+  return `sha256:${createHash('sha256').update(stableStringify(rest), 'utf8').digest('hex')}`
 }
 
 /** Collapse control characters/whitespace and cap a failure pattern. */
@@ -397,6 +451,41 @@ export interface ExperienceSkip {
  * clamped, `observedIn` keeps the 5 most recent ids, and confidence is
  * recomputed with the frozen v3 formula.
  */
+function sanitizeVerification(value: unknown): ExperienceVerification | undefined {
+  if (!isRecord(value)) return undefined
+  if (value.schema !== 'harness2-verification/v1') return undefined
+  if (typeof value.reportHash !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(value.reportHash)) return undefined
+  if (typeof value.batchId !== 'string' || value.batchId.length === 0) return undefined
+  if (typeof value.revisionId !== 'string' || value.revisionId.length === 0) return undefined
+  if (typeof value.profile !== 'string' || value.profile.length === 0) return undefined
+  if (value.providerClass !== 'real') return undefined
+  if (value.verdict !== 'accept' && value.verdict !== 'reject') return undefined
+  const numeric: Record<string, number> = {}
+  for (const key of ['b', 'c', 'N', 'delta', 'p']) {
+    const item = value[key]
+    if (typeof item !== 'number' || !Number.isFinite(item)) return undefined
+    numeric[key] = item
+  }
+  const tokenCostSource = value.tokenCostSource === 'measured' || value.tokenCostSource === 'estimated'
+    ? value.tokenCostSource : 'estimated'
+  return {
+    schema: 'harness2-verification/v1',
+    reportHash: value.reportHash,
+    batchId: value.batchId.slice(0, 120),
+    revisionId: value.revisionId.slice(0, 120),
+    profile: value.profile.slice(0, 120),
+    providerClass: 'real',
+    verdict: value.verdict,
+    b: Math.max(0, Math.floor(numeric.b!)),
+    c: Math.max(0, Math.floor(numeric.c!)),
+    N: Math.max(0, Math.floor(numeric.N!)),
+    delta: numeric.delta!,
+    p: numeric.p!,
+    tokenCostSource,
+    ...(value.sourceMissing === true ? { sourceMissing: true } : {}),
+  }
+}
+
 export function sanitizeExperienceEntry(
   value: unknown,
   samePatternCount = 0,
@@ -478,6 +567,9 @@ export function sanitizeExperienceEntry(
       },
       confidence: scoreConfidence(trials, outcome.adoption, tokenCostSource, samePatternCount),
       ...(migrated.migratedFrom === undefined ? {} : { migratedFrom: migrated.migratedFrom }),
+      ...(sanitizeVerification(value.verification) === undefined
+        ? {}
+        : { verification: sanitizeVerification(value.verification)! }),
     },
   }
 }
@@ -727,6 +819,10 @@ export interface ExperienceServiceOptions {
   readonly minConfidenceToInject: number
   readonly minNegativeConfidenceToInject: number
   readonly enableNegativeExperience: boolean
+  readonly enableLegacyExperience?: boolean
+  readonly ledgerPath?: string
+  readonly evaluationsPath: string
+  readonly applyStatePath: string
   readonly reflect?: (
     probe: ProbeCompletedPayload | undefined,
     event: ComposeAppliedPayload | ComposeRejectedPayload,
@@ -749,6 +845,11 @@ export class Harness2ExperienceService {
   private readonly minConfidenceToInject: number
   private readonly minNegativeConfidenceToInject: number
   private readonly enableNegativeExperience: boolean
+  private readonly enableLegacyExperience: boolean
+  private readonly evaluationsPath: string
+  private readonly applyStatePath: string
+  private readonly seedAppliedComponents = new Set<string>()
+  private readonly evictedRevisions = new Set<string>()
   private readonly reflect:
     | ((
         probe: ProbeCompletedPayload | undefined,
@@ -772,6 +873,9 @@ export class Harness2ExperienceService {
     this.minConfidenceToInject = options.minConfidenceToInject
     this.minNegativeConfidenceToInject = options.minNegativeConfidenceToInject
     this.enableNegativeExperience = options.enableNegativeExperience
+    this.enableLegacyExperience = options.enableLegacyExperience === true
+    this.evaluationsPath = resolveEvaluationsPath(options.evaluationsPath, options.ledgerPath ?? './harness2-ledger.jsonl')
+    this.applyStatePath = resolveApplyStatePath(options.applyStatePath)
     this.reflect = options.reflect
     this.log = options.log
     this.onError = options.onError ?? ((code, details) => {
@@ -800,6 +904,13 @@ export class Harness2ExperienceService {
 
   /** Record a positive entry for `compose/applied` (only positive path). */
   async recordApplied(payload: ComposeAppliedPayload): Promise<ExperienceEntry | undefined> {
+    // PR-5: compose decisions are diagnostic only; evidence comes exclusively
+    // from real-provider verified evaluations.
+    this.onError('gate-decision-not-evidence', { cycleId: payload.cycleId })
+    return undefined
+  }
+
+  private async recordAppliedLegacyRemoved(payload: ComposeAppliedPayload): Promise<ExperienceEntry | undefined> {
     await this.settled
     const pending = this.pending.get(payload.cycleId)?.probe
     if (payload.appliedEdits.length === 0) {
@@ -867,6 +978,12 @@ export class Harness2ExperienceService {
    * the trial facts, never from the reflection model.
    */
   async recordRejected(payload: ComposeRejectedPayload): Promise<ExperienceEntry[]> {
+    // PR-5: compose decisions are diagnostic only.
+    this.onError('gate-decision-not-evidence', { cycleId: payload.cycleId })
+    return []
+  }
+
+  private async recordRejectedLegacyRemoved(payload: ComposeRejectedPayload): Promise<ExperienceEntry[]> {
     if (!this.enableNegativeExperience) return []
     if (!NEGATIVE_EXPERIENCE_REASONS.includes(payload.reason)) return []
     await this.settled
@@ -957,15 +1074,19 @@ export class Harness2ExperienceService {
     ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
     if (populated.length === 0) return { priors: [], totalMatched: 0 }
 
-    const applied = new Set(
-      (query.appliedComponents ?? []).filter((item): item is string => typeof item === 'string'),
-    )
+    const applied = new Set([
+      ...this.seedAppliedComponents,
+      ...(query.appliedComponents ?? []).filter((item): item is string => typeof item === 'string'),
+    ])
     const requestedLimit = typeof query.limit === 'number' && Number.isFinite(query.limit)
       ? Math.floor(query.limit)
       : this.topKInjection
     const limit = Math.max(0, Math.min(requestedLimit, this.topKInjection, this.maxExperienceEntries))
 
     const matched = this.entriesInternal
+      .filter((entry) => entry.condition.taskDomain !== 'eval-holdout')
+      .filter((entry) => entry.verification !== undefined || this.enableLegacyExperience)
+      .filter((entry) => entry.verification === undefined || !this.evictedRevisions.has(entry.verification.revisionId))
       .filter((entry) =>
         entry.outcome.adoption === 'accepted'
           ? entry.confidence >= this.minConfidenceToInject
@@ -1064,7 +1185,16 @@ export class Harness2ExperienceService {
     readonly trials: number
     readonly adoption: 'accepted' | 'rejected'
     readonly tokenCostSource: TokenCostSource
+    readonly verification?: ExperienceVerification
   }): ExperienceEntry | undefined {
+    if (input.verification !== undefined) {
+      const duplicate = this.entriesInternal.some(
+        (entry) => entry.verification?.reportHash === input.verification!.reportHash,
+      )
+      if (duplicate) return this.entriesInternal.find(
+        (entry) => entry.verification?.reportHash === input.verification!.reportHash,
+      )
+    }
     if (input.trials <= 0) {
       // Q5: no-evidence entries are refused before any write.
       this.onError('no-evidence', { reason: 'trials-zero' })
@@ -1108,6 +1238,7 @@ export class Harness2ExperienceService {
         },
         confidence,
         ...(existing.migratedFrom === undefined ? {} : { migratedFrom: existing.migratedFrom }),
+        ...(input.verification === undefined ? {} : { verification: input.verification }),
       }
       this.entriesInternal = this.entriesInternal.map((candidate, index) =>
         (index === existingIndex ? entry : candidate))
@@ -1130,6 +1261,7 @@ export class Harness2ExperienceService {
           tokenCostSource: input.tokenCostSource,
         },
         confidence,
+        ...(input.verification === undefined ? {} : { verification: input.verification }),
       }
       this.entriesInternal = [...this.entriesInternal, entry]
     }
@@ -1145,7 +1277,7 @@ export class Harness2ExperienceService {
   /** Load the experience library once; always settles `ready`. */
   private async load(): Promise<void> {
     try {
-      let text: string
+      let text = ''
       try {
         text = await readFile(this.experiencePath, 'utf8')
       } catch (error) {
@@ -1154,7 +1286,7 @@ export class Harness2ExperienceService {
             error: error instanceof Error ? error.message : String(error),
           })
         }
-        return
+        // PR-5: a missing EXPERIENCE.md must not skip verified-evaluation ingest.
       }
       let parsed: {
         readonly entries: ExperienceEntry[]
@@ -1189,9 +1321,132 @@ export class Harness2ExperienceService {
           })
         })
       }
+      await this.loadApplyState()
+      await this.ingestEvaluations()
     } finally {
       this.isReady = true
     }
+  }
+
+  /** PR-5: seed applied components and collect rolled-back revisions. */
+  private async loadApplyState(): Promise<void> {
+    try {
+      const text = await readFile(this.applyStatePath, 'utf8')
+      const active: unknown = JSON.parse(text)
+      if (isRecord(active)) {
+        if (active.status === 'rolled-back') {
+          if (typeof active.revisionId === 'string') this.evictedRevisions.add(active.revisionId)
+          if (Array.isArray(active.contentHashes)) {
+            for (const hash of active.contentHashes) {
+              if (typeof hash === 'string') this.evictedRevisions.add(`content:${hash}`)
+            }
+          }
+        } else if (Array.isArray(active.appliedComponents)) {
+          for (const component of active.appliedComponents) {
+            if (typeof component === 'string') this.seedAppliedComponents.add(component)
+          }
+        }
+      }
+      const journalPath = path.join(path.dirname(this.applyStatePath), 'journal.jsonl')
+      const journal = await readFile(journalPath, 'utf8').catch(() => '')
+      for (const line of journal.split('\n')) {
+        if (line.trim().length === 0) continue
+        try {
+          const record: unknown = JSON.parse(line)
+          if (isRecord(record) && record.kind === 'rolled-back' && typeof record.revisionId === 'string') {
+            this.evictedRevisions.add(record.revisionId)
+          }
+        } catch { /* ignore malformed journal lines */ }
+      }
+    } catch (error) {
+      if (!isMissingFile(error)) this.onError('apply-state-read-failed', { error: describeError(error) })
+    }
+  }
+
+  /**
+   * PR-5: ingest real-provider verified evaluations from the eval index.
+   * The index points at reports; providerClass must be real, reportHash must
+   * verify, and provenance must be present. fake/inconclusive/hash-mismatch are
+   * diagnostic only and never write experience.
+   */
+  private async ingestEvaluations(): Promise<void> {
+    let text: string
+    try { text = await readFile(this.evaluationsPath, 'utf8') } catch (error) {
+      if (!isMissingFile(error)) this.onError('evaluation-index-read-failed', { error: describeError(error) })
+      return
+    }
+    let wrote = false
+    for (const line of text.split('\n')) {
+      if (line.trim().length === 0) continue
+      let indexed: unknown
+      try { indexed = JSON.parse(line) } catch { continue }
+      if (!isRecord(indexed) || indexed.schema !== 'harness2-eval-index/v1') continue
+      const batchId = typeof indexed.batchId === 'string' ? indexed.batchId : undefined
+      if (batchId === undefined) continue
+      if (indexed.providerClass !== 'real') { this.onError('verification-provider-invalid', { batchId }); continue }
+      if (indexed.verdict !== 'accept' && indexed.verdict !== 'reject') { this.onError('verification-report-invalid', { batchId }); continue }
+      const reportPath = typeof indexed.reportPath === 'string'
+        ? path.resolve(path.dirname(this.evaluationsPath), indexed.reportPath)
+        : undefined
+      if (reportPath === undefined) { this.onError('verification-report-invalid', { batchId }); continue }
+      let report: unknown
+      try { report = JSON.parse(await readFile(reportPath, 'utf8')) } catch (error) {
+        this.onError('verification-report-invalid', { batchId, error: describeError(error) })
+        continue
+      }
+      if (!isRecord(report) || report.schema !== 'harness2-eval/v1') { this.onError('verification-report-invalid', { batchId }); continue }
+      if (report.providerClass !== 'real') { this.onError('verification-provider-invalid', { batchId }); continue }
+      const verdict = report.verdict
+      if (verdict !== 'accept' && verdict !== 'reject') { this.onError('verification-report-invalid', { batchId }); continue }
+      if (verdict !== indexed.verdict) { this.onError('verification-report-invalid', { batchId }); continue }
+      if (typeof report.reportHash !== 'string' || report.reportHash !== indexed.reportHash || report.reportHash !== evaluationReportHash(report)) {
+        this.onError('verification-hash-mismatch', { batchId }); continue
+      }
+      const source = isRecord(report.source) ? report.source : undefined
+      if (report.sourceMissing === true || source === undefined || typeof source.failurePattern !== 'string') {
+        this.onError('verification-source-missing', { batchId }); continue
+      }
+      if (source.taskDomain === 'eval-holdout') { this.onError('verification-eval-holdout', { batchId }); continue }
+      const edit = isRecord(report.edit) ? report.edit : undefined
+      if (edit === undefined || typeof edit.component !== 'string' || typeof edit.operation !== 'string'
+        || typeof edit.contentHash !== 'string') { this.onError('verification-report-invalid', { batchId }); continue }
+      const b = typeof report.b === 'number' ? report.b : 0
+      const c = typeof report.c === 'number' ? report.c : 0
+      const N = typeof report.N === 'number' ? report.N : 0
+      if (N <= 0) { this.onError('verification-report-invalid', { batchId }); continue }
+      const verification: ExperienceVerification = {
+        schema: 'harness2-verification/v1',
+        reportHash: report.reportHash,
+        batchId,
+        revisionId: typeof report.revisionId === 'string' ? report.revisionId : '',
+        profile: typeof report.profile === 'string' ? report.profile : '',
+        providerClass: 'real',
+        verdict,
+        b, c, N,
+        delta: (b - c) / N,
+        p: typeof report.p === 'number' ? report.p : 1,
+        tokenCostSource: report.tokenCostSource === 'measured' ? 'measured' : 'estimated',
+      }
+      const entry = this.upsert({
+        failurePattern: normalizeFailurePattern(source.failurePattern),
+        ...(typeof source.taskDomain === 'string' && source.taskDomain.length > 0 ? { taskDomain: source.taskDomain.slice(0, 120) } : {}),
+        observedIn: [`eval:${batchId}`],
+        edit: {
+          component: edit.component,
+          operation: edit.operation,
+          contentHash: edit.contentHash,
+          contentPreview: normalizeFailurePattern(source.failurePattern).slice(0, 200),
+        },
+        metricDelta: { successRateDelta: verification.delta, completion: verification.delta },
+        trials: N,
+        adoption: verdict === 'accept' ? 'accepted' : 'rejected',
+        tokenCostSource: verification.tokenCostSource,
+        verification,
+      })
+      if (entry === undefined) this.onError('verification-ingest-failed', { batchId })
+      else wrote = true
+    }
+    if (wrote) await this.persist()
   }
 
   private async quarantine(reason: 'corrupt' | 'foreign' | 'unreadable'): Promise<void> {
@@ -1237,6 +1492,7 @@ function freezeEntry(entry: ExperienceEntry): ExperienceEntry {
     }),
     confidence: entry.confidence,
     ...(entry.migratedFrom === undefined ? {} : { migratedFrom: entry.migratedFrom }),
+    ...(entry.verification === undefined ? {} : { verification: Object.freeze({ ...entry.verification }) }),
   })
 }
 
@@ -1330,6 +1586,10 @@ export function apply(ctx: Context, config: Config): void {
     minConfidenceToInject: config.minConfidenceToInject,
     minNegativeConfidenceToInject: config.minNegativeConfidenceToInject,
     enableNegativeExperience: config.enableNegativeExperience,
+    enableLegacyExperience: config.enableLegacyExperience,
+    evaluationsPath: config.evaluationsPath,
+    ledgerPath: config.ledgerPath,
+    applyStatePath: config.applyStatePath,
     log,
     onError,
     reflect: (probe, event) => reflectExperience(ctx, config, probe, event),

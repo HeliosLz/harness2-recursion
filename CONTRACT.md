@@ -325,3 +325,14 @@ Gate-v4 的 `compose/rejected.rejectedCandidateIds` 为 **audit-complete**：列
 - **生产 apply 只接受 `providerClass:'real'`**；fake-calibration 报告 → `evaluation-fake-provider`。fake 只做工具校准；端到端 fake 测试仅通过 `--allow-unevaluated` + `HARNESS2_ALLOW_UNEVALUATED=1` 调试逃生口，journal/active/manifest 记录 `forced-unevaluated`。
 - **NULL/inert 语义（次选）**：PR-4.1 不增加第五臂；I 臂是 shape-matched inert/NULL proxy。报告字段为 `inertControlRejected` 与 `nullProxyRejected`，两者均要求 I 数据完整；I 缺失/超时 → `inconclusive`，不得用缺失数据满足负向控制；I 完整且被接受 → 两字段 false。CONTRACT 不接受 `nullRevisionRejected = inertRejected` 的旧语义。
 - `pr3:integration` 继续通过强制调试路径验证 applier 回归；`pr4:integration` 验证 fake 拒绝 + debug 路径标记。
+
+## 15. PR-5（meta verified-experience + legacy quarantine，已实现）
+
+- `compose/applied`/`compose/rejected` 对 meta 只作诊断：监听/导出保留，`recordApplied` 返回 undefined、`recordRejected` 返回 []，均 `onError('gate-decision-not-evidence',{cycleId})`，不写 EXPERIENCE.md。
+- 唯一经验来源：eval index（`harness2-eval-index/v1`）指向的 `harness2-eval/v1` 报告，`providerClass:'real'`，reportHash/index hash 一致（轻量重算），`source` provenance 存在；`accept`→positive、`reject`→negative；`inconclusive`/fake/hash 错误/缺 source 不写，诊断码见 docs/round-6-pr5.md。
+- `ExperienceEntry.verification`（additive）schema `harness2-verification/v1`：reportHash/batchId/revisionId/profile/providerClass/verdict/b/c/N/delta/p/tokenCostSource。`outcome.trials=N`，`observedIn=['eval:<batchId>']`，`condition.failurePattern` 来自原始 composed evidence；同一 reportHash 幂等。
+- Provenance：applier plan 从 ledger `previousSnapshotRef` 链取 `probe/completed`，manifest 写 `source`（taskId/cycleId/failurePattern/evidenceSummaryHash，不可得 `sourceMissing:true`）与 `edit`/`appliedComponents`；eval report additive 带 edit/source；index 原子 append。
+- Legacy quarantine：无 verification 的条目默认不进 priors/不计数（enableLegacyExperience=true 可注入但仍无 verification）；`taskDomain:'eval-holdout'` 永不注入；不删除/迁移旧文件。
+- apply state：active 的 appliedComponents seed 已应用集合；rolled-back revision/contentHash 从 priors 驱逐（保留文件审计）。
+- Config additive：`evaluationsPath`、`ledgerPath`、`applyStatePath`、`enableLegacyExperience`（默认 false）。不改 ledger v3/bus/confidence v3/`AppliedEdit`/Gate-v4/applier 强制。
+- 残余风险：providerClass 是本地自声明，非密码学证明；meta 只做轻量 verification/hash 校验，统计重算仍由 eval/applier 完成。

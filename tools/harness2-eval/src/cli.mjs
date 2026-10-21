@@ -4,7 +4,7 @@
  * Commands: run, replay, help. Exit codes 0/1/2.
  */
 import { spawnSync } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -115,11 +115,21 @@ async function main() {
     revisionId: manifest.revId, profile: manifest.profile, cycleId: manifest.cycleId,
     contentHash: manifest.contentHashes[0], planToken: manifest.planToken,
     prereg, batch, tasksHash, preregHash, runner, batchId,
+    edit: manifest.edit, source: manifest.source, sourceMissing: manifest.sourceMissing === true,
+    tokenCostSource: 'estimated',
   })
   const reportDir = path.join(path.dirname(revision.editsDir), 'eval', batchId)
   await mkdir(path.join(reportDir, 'runs'), { recursive: true })
   await writeFile(path.join(reportDir, 'report.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8')
   await writeFile(path.join(reportDir, 'runs', 'runs.jsonl'), `${runs.map((run) => JSON.stringify(run)).join('\n')}\n`, 'utf8')
+  const indexDir = path.dirname(reportDir)
+  await mkdir(indexDir, { recursive: true })
+  await appendFile(path.join(indexDir, 'index.jsonl'), `${JSON.stringify({
+    schema: 'harness2-eval-index/v1',
+    batchId, revisionId: manifest.revId, reportPath: path.join(path.basename(reportDir), 'report.json'),
+    reportHash: report.reportHash, providerClass: report.providerClass, verdict: report.verdict,
+    fold: report.fold, createdAt: new Date().toISOString(),
+  })}\n`, 'utf8')
   process.stdout.write(`${JSON.stringify({ ok: true, batchId, report: path.join(reportDir, 'report.json'), verdict: report.verdict, b: report.b, c: report.c, N: report.N, delta: report.delta, p: report.p, reportHash: report.reportHash, order }, null, 2)}\n`)
 }
 

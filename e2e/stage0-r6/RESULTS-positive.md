@@ -9,7 +9,7 @@
 - inadmissible candidate receipts: 0
 - edit bodies: 2 unique (2 hash-valid), referenced hashes 2, missing 0
 - applied edit counts: [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
-- fake requests: {"main":80,"propose":20,"probe":120,"reflection":20}
+- fake requests: {"main":80,"propose":20,"probe":120}
 - elapsed: 116.4s
 
 ## Checks

@@ -36,3 +36,9 @@ ctx.provide('harness2Experience', Object.freeze({ ready, queryPriors }))
 ```bash
 npm run build && node --test test/verify.mjs   # 14 项
 ```
+
+## Round-6 PR-5（verified-experience）
+
+- 不再从 `compose/*` 写经验；唯一来源是 `eval/index.jsonl` 指向的 real-provider `harness2-eval/v1` 报告。
+- 条目带 `verification:harness2-verification/v1`；legacy 条目默认隔离（`enableLegacyExperience:false`）；`eval-holdout` 永不注入。
+- 配置：`evaluationsPath`、`ledgerPath`、`applyStatePath`、`enableLegacyExperience`。

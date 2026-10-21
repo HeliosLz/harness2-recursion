@@ -171,13 +171,12 @@ test('loader contract — raw configs mount; all three events reach the real bus
     ctx.emit('probe/completed', probeEvent('live-2'))
     ctx.emit('compose/rejected', rejectedEvent('live-2'))
 
-    await waitFor(async () =>
-      facade.queryPriors({ failureSignature: { messagePattern: 'command failed' } }).totalMatched === 2)
+    // PR-5: compose decisions are diagnostic only; they must not write
+    // experience. The real bus delivery is exercised by these emits.
+    await new Promise((resolve) => setTimeout(resolve, 80))
     const result = facade.queryPriors({ failureSignature: { messagePattern: 'command failed' } })
-    assert.equal(result.priors.length, 2)
-    assert.ok(result.priors.some((prior) => prior.outcome.adoption === 'accepted'))
-    assert.ok(result.priors.some((prior) => prior.outcome.adoption === 'rejected'))
-    assert.ok(result.priors.every((prior) => Object.isFrozen(prior)))
+    assert.equal(result.totalMatched, 0)
+    assert.equal(result.priors.length, 0)
 
     // R4-1: propose/failed is diagnostic only; it must not change the library.
     const before = facade.queryPriors({ failureSignature: { messagePattern: 'command failed' } }).totalMatched
@@ -224,12 +223,9 @@ test('loader contract — built lib/ artifacts mount and expose the facade', asy
     await waitFor(async () => facade.ready === true)
     ctx.emit('probe/completed', probeEvent('lib-1'))
     ctx.emit('compose/applied', appliedEvent('lib-1'))
-    await waitFor(async () =>
-      facade.queryPriors({ failureSignature: { messagePattern: 'command failed' } }).priors.length === 1)
-    const prior = facade.queryPriors({ failureSignature: { messagePattern: 'command failed' } }).priors[0]
-    assert.equal(prior.condition.failurePattern.includes('command failed'), true)
-    assert.match(prior.edit.contentHash, /^sha256:[0-9a-f]{64}$/)
-    assert.equal(prior.outcome.tokenCostSource, 'measured')
+    // PR-5: no compose-derived priors even from the built facade.
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    assert.equal(facade.queryPriors({ failureSignature: { messagePattern: 'command failed' } }).priors.length, 0)
     await metaFiber.dispose()
     await taskFiber.dispose()
   } finally {

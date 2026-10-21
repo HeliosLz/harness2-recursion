@@ -128,3 +128,11 @@ Sessions: 2 (exit 0, final answer printed)
 - providerClass 必填且与 prereg 一致；生产 apply 只接受 real；fake → `evaluation-fake-provider`；debug 仅 `--allow-unevaluated` + `HARNESS2_ALLOW_UNEVALUATED=1`，记录 forced-unevaluated。
 - NULL/inert 语义：I 为 NULL proxy（非独立 N 臂），`inertControlRejected` 与 `nullProxyRejected` 分开计算且要求 I 数据完整；缺失数据 → inconclusive。
 - 测试：verify:apply **9/9**、verify:eval **6/6**、verify **50/50**；pr4 integration fake 拒绝 + debug PASS；pr3 integration PASS。
+
+## 十二、Round-6 PR-5（verified-experience，2026-10-21）
+
+- compose/applied/rejected 仅诊断，不写 EXPERIENCE；经验唯一来源是 real-provider eval index/report。
+- verification schema additive；trials=N、observedIn=eval:<batch>、failurePattern 来自原始 probe source；同 reportHash 幂等；fake/inconclusive/hash/source 缺失不写。
+- legacy 无 verification 默认 quarantine（enableLegacyExperience=true 才注入）；eval-holdout 永不注入；旧文件不迁移。
+- active appliedComponents seed；rolled-back revision/contentHash 从 priors 驱逐。
+- 测试：verify:meta **14/14**、verify **50/50**、verify:apply **9/9**、verify:eval **6/6**；pr3/pr4 integration、stage0 三 harness PASS。

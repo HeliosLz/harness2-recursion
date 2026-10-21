@@ -399,6 +399,52 @@ export async function appendJournal(dshHome, entry) {
 
 /* ── plan ────────────────────────────────────────────────────────────────── */
 
+/**
+ * PR-5 provenance: locate the probe/completed record feeding the applied cycle.
+ * Walks the previousSnapshotRef chain first, then falls back to the closest
+ * earlier probe with the same taskId. Returns undefined when unavailable.
+ */
+export async function findSourceForApplied(ledgerPath, appliedRecord) {
+  let text
+  try { text = await readFile(ledgerPath, 'utf8') } catch { return undefined }
+  const records = []
+  for (const line of text.split('\n')) {
+    if (line.trim().length === 0) continue
+    try { records.push(JSON.parse(line)) } catch { /* ignore */ }
+  }
+  const byId = new Map(records.filter((record) => typeof record?.id === 'string').map((record) => [record.id, record]))
+  let cursor = appliedRecord?.previousSnapshotRef
+  const seen = new Set()
+  while (typeof cursor === 'string' && cursor.length > 0 && !seen.has(cursor)) {
+    seen.add(cursor)
+    const record = byId.get(cursor)
+    if (record === undefined) break
+    if (record.event === 'probe/completed' && record.payload?.taskId === appliedRecord.payload?.taskId) {
+      return sourceFromProbe(record.payload)
+    }
+    cursor = record.previousSnapshotRef
+  }
+  const index = records.findIndex((record) => record?.id === appliedRecord?.id)
+  for (let position = index - 1; position >= 0; position -= 1) {
+    const record = records[position]
+    if (record?.event === 'probe/completed' && record.payload?.taskId === appliedRecord.payload?.taskId) {
+      return sourceFromProbe(record.payload)
+    }
+  }
+  return undefined
+}
+
+function sourceFromProbe(probe) {
+  const evidence = typeof probe?.evidenceSummary === 'string' ? probe.evidenceSummary : ''
+  const failurePattern = evidence.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200)
+  return {
+    taskId: typeof probe.taskId === 'string' ? probe.taskId : '',
+    cycleId: typeof probe.cycleId === 'string' ? probe.cycleId : '',
+    failurePattern: failurePattern.length > 0 ? failurePattern : 'unknown-failure',
+    evidenceSummaryHash: hashOf(evidence),
+  }
+}
+
 export async function planRevision(options) {
   const {
     dshHome, profile, ledgerPath, editsDir: configuredEditsDir, cycleId,
@@ -408,6 +454,7 @@ export async function planRevision(options) {
   await stat(paths.profileDir).catch(() => { throw new ApplyError('profile-missing', `profile directory missing: ${paths.profileDir}`) })
   const editsDir = path.resolve(configuredEditsDir ?? path.join(path.dirname(ledgerPath), 'edits'))
   const record = await readAppliedRecord(ledgerPath, cycleId)
+  const source = await findSourceForApplied(ledgerPath, record)
   const appliedEdits = record.payload.appliedEdits
   const bodies = []
   const metadataMismatch = []
@@ -449,6 +496,14 @@ export async function planRevision(options) {
     basePatchHash, renderedPatchHash, renderDigest, planToken,
     metadataMismatch, metadataMismatchAllowed: allowBodyMetadataMismatch,
     smokeRequired, evaluation: 'not-run', createdAt: new Date().toISOString(),
+    edit: appliedEdits[0] === undefined ? undefined : {
+      candidateId: appliedEdits[0].candidateId,
+      component: appliedEdits[0].component,
+      operation: appliedEdits[0].operation,
+      contentHash: appliedEdits[0].contentHash,
+    },
+    ...(source === undefined ? { sourceMissing: true } : { source }),
+    appliedComponents: [...new Set(appliedEdits.map((edit) => edit.component))],
   }
   const plan = {
     schema: APPLY_SCHEMA, revId, profile, patchBefore, patchAfter,
@@ -679,8 +734,9 @@ export async function applyRevision(options) {
   const hmrRow = dumpText.length > 0 ? parseDumpRows(dumpText).get('hmr') : undefined
   const reload = hmrRow !== undefined && hmrRow.disabled !== true ? 'hmr-pending-human-confirm' : 'restart-required'
   const active = {
-    schema: APPLY_SCHEMA, kind: 'active', revisionId: revId, profile: manifest.profile,
+    schema: APPLY_SCHEMA, kind: 'active', status: 'active', revisionId: revId, profile: manifest.profile,
     basePatchHash: manifest.basePatchHash, renderedPatchHash: manifest.renderedPatchHash,
+    contentHashes: manifest.contentHashes, appliedComponents: manifest.appliedComponents ?? [],
     reload, evaluation: evaluationMode, ...evaluationMeta, appliedAt: new Date().toISOString(),
   }
   await mkdir(path.join(dshHome, 'apply'), { recursive: true })
@@ -715,7 +771,7 @@ export async function rollbackRevision(options) {
   const restored = await fileHash(paths.patchPath)
   if (restored !== manifest.basePatchHash) throw new ApplyError('rollback-verify-failed', 'restored patch hash does not match basePatchHash')
   await mkdir(path.join(dshHome, 'apply'), { recursive: true })
-  await atomicWrite(path.join(dshHome, 'apply', 'active.json'), `${JSON.stringify({ schema: APPLY_SCHEMA, kind: 'active', status: 'rolled-back', revisionId: revId, profile: manifest.profile, rolledBackAt: new Date().toISOString() }, null, 2)}\n`)
+  await atomicWrite(path.join(dshHome, 'apply', 'active.json'), `${JSON.stringify({ schema: APPLY_SCHEMA, kind: 'active', status: 'rolled-back', revisionId: revId, profile: manifest.profile, contentHashes: manifest.contentHashes, rolledBackAt: new Date().toISOString() }, null, 2)}\n`)
   await appendJournal(dshHome, { kind: 'rolled-back', revisionId: revId, profile: manifest.profile, restoredPatchHash: restored, recordedAt: new Date().toISOString() })
   return { revisionId: revId, restoredPatchHash: restored }
 }
