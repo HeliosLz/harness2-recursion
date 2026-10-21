@@ -68,6 +68,7 @@ import type { GateMetrics, GateV4Receipt } from './gate-v4.ts'
 
 export { COMPONENT_NAMES, LEGACY_COMPONENT_MIGRATION, isComponentName }
 export {
+  deriveCandidateId,
   editBodyPath,
   gcEditBodies,
   readEditBody,

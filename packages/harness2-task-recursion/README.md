@@ -40,6 +40,7 @@ export function apply(ctx, config)
 - Propose 后为所有候选写 `harness2-edit/v1` 内容寻址 body；写失败 fail closed。
 - apply 前 `verifyEditBodies`；缺失 → `compose/rejected(compose-not-wired)`。
 - `gcEditBodies` 删除过期未引用 body，legacy ledger 无 body → `legacy-no-body`。
+- `candidateId` 必须是 `cand-<16 hex>` 且与 `(candidateType, component, content)` 推导一致；`verifyEditBodies` 做 candidateId 一致性校验。
 
 ## Round-6 PR-1（Gate-v4）
 

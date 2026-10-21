@@ -45,6 +45,20 @@ export interface EditBody {
   readonly createdAt: string
 }
 
+/** Candidate id derivation shared with Propose (cand-<16 hex>). */
+export function deriveCandidateId(
+  candidateType: 'invariant' | 'domain',
+  component: string,
+  content: string,
+): string {
+  return `cand-${createHash('sha256')
+    .update(`${candidateType}:${component}:${content}`, 'utf8')
+    .digest('hex')
+    .slice(0, 16)}`
+}
+
+const CANDIDATE_ID_RE = /^cand-[0-9a-f]{16}$/
+
 export type EditBodyErrorCode =
   | 'legacy-no-body'
   | 'invalid-body'
@@ -149,7 +163,9 @@ export function validateEditBody(value: unknown): string[] {
   if (typeof record.contentHash !== 'string' || hashHex(record.contentHash) === undefined) {
     errors.push('contentHash must be sha256:<64 lowercase hex>')
   }
-  if (typeof record.candidateId !== 'string' || record.candidateId.length === 0) errors.push('candidateId is required')
+  if (typeof record.candidateId !== 'string' || !CANDIDATE_ID_RE.test(record.candidateId)) {
+    errors.push('candidateId must be cand-<16 lowercase hex>')
+  }
   if (record.candidateType !== 'invariant' && record.candidateType !== 'domain') errors.push('candidateType must be invariant | domain')
   if (!isComponentName(record.component)) errors.push('component is not a frozen component name')
   if (typeof record.operation !== 'string' || record.operation.length === 0) errors.push('operation is required')
@@ -165,6 +181,15 @@ export function validateEditBody(value: unknown): string[] {
     if (rendererRecord.hints === null || typeof rendererRecord.hints !== 'object' || Array.isArray(rendererRecord.hints)) {
       errors.push('renderer.hints must be an object')
     }
+  }
+  if (errors.length === 0
+    && typeof record.candidateType === 'string'
+    && (record.candidateType === 'invariant' || record.candidateType === 'domain')
+    && typeof record.component === 'string'
+    && typeof record.content === 'string'
+    && typeof record.candidateId === 'string') {
+    const derived = deriveCandidateId(record.candidateType, record.component, record.content)
+    if (record.candidateId !== derived) errors.push('candidateId does not match the derived candidate id')
   }
   if (typeof record.taskId !== 'string' || record.taskId.length === 0) errors.push('taskId is required')
   if (typeof record.cycleId !== 'string' || record.cycleId.length === 0) errors.push('cycleId is required')
@@ -325,6 +350,15 @@ export async function verifyEditBodies(
     if (!result.ok) {
       if (result.code === 'legacy-no-body') missing.push(candidate.edit.contentHash)
       else mismatched.push(candidate.edit.contentHash)
+      continue
+    }
+    if (result.body?.candidateId !== candidate.candidateId) {
+      options.onError?.('edit-body-candidate-mismatch', {
+        expected: candidate.candidateId,
+        actual: result.body?.candidateId ?? null,
+        contentHash: candidate.edit.contentHash,
+      })
+      mismatched.push(candidate.edit.contentHash)
     }
   }
   return { ok: missing.length === 0 && mismatched.length === 0, missing, mismatched }

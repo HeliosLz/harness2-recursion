@@ -8,7 +8,7 @@
 ## 1. 实现
 
 - 新增 `packages/harness2-task-recursion/src/edit-store.ts`：
-  - `harness2-edit/v1` schema + `validateEditBody`；
+  - `harness2-edit/v1` schema + `validateEditBody`；`candidateId` 必须为 `cand-<16 lowercase hex>` 且等于 `(candidateType, component, content)` 的确定性推导；`verifyEditBodies` 同时比对 candidateId，不一致 → `onError('edit-body-candidate-mismatch')`；
   - `resolveEditsDir(editsDir, ledgerPath)`：空 → `<dirname(ledgerPath)>/edits`；非空按 ledgerPath 同规则（绝对原样，相对 → `$DSH_HOME/harness2/`，否则 cwd）；
   - `editBodyPath` 只用 `sha256:<64 hex>` 的 hex 部分拼 `<hex>.json`，拒绝路径穿越；
   - `writeEditBody`：原子写（tmp→fsync(file)→rename→fsync(dir)）、`0o600`、幂等（同内容返回 `written:false`），不同内容拒绝；

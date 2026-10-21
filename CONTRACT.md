@@ -285,6 +285,7 @@ Gate-v4 的 `compose/rejected.rejectedCandidateIds` 为 **audit-complete**：列
 `compose/applied.appliedEdits` 仍只有 `{candidateId, contentHash, component, operation}`（冻结不变）；编辑正文持久化在内容寻址 sidecar：
 
 - `harness2-edit/v1`：`{schema, contentHash, candidateId, candidateType, component, operation, content, renderer:{kind,hints}, taskId, cycleId, createdAt}`；读取时重算 `sha256(content)`，不匹配 → `onError('edit-body-hash-mismatch')` 并拒绝。
+- `candidateId` 必须是 `cand-<16 lowercase hex>`，且必须等于 `cand-` + `sha256("<candidateType>:<component>:<content>")` 前 16 hex（与 Propose 同一推导）；`verifyEditBodies` 同时校验 body 的 candidateId 与待应用 candidate 一致，不一致 → `onError('edit-body-candidate-mismatch')` 并拒绝 apply。
 - 路径：`editsDir`（Config，默认空 → `<dirname(resolved ledgerPath)>/edits`）；文件 `<editsDir>/<64 hex>.json`；原子写（tmp→fsync→rename→fsync(dir)），`0o600`，同 hash+content 幂等，不同内容拒绝。
 - 时机：Propose 成功后、Probe 之前为所有候选写 body；写失败 → `onError('edit-store-write-failed')`，本 cycle 不 append/emit 任何事件。Compose apply 前用 `verifyEditBodies` 校验 body 存在且 hash 匹配；缺失 → 拒绝 apply，reason `compose-not-wired`。
 - 旧 ledger/Stage-0 fixture 无 body → `legacy-no-body`（不阻止 replay，不 backfill）。

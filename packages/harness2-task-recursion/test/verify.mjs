@@ -27,6 +27,8 @@ const PUBLIC_EMITTED_EVENTS = ['probe/completed', 'compose/applied', 'compose/re
 const ALLOWED_CTX_MEMBERS = new Set(['on', 'emit', 'logger', 'tools', 'agents', 'inject', 'get', 'llm'])
 const sha256 = (value) => createHash('sha256').update(value, 'utf8').digest('hex')
 const hashOf = (value) => `sha256:${sha256(value)}`
+const candidateIdFor = (candidateType, component, content) =>
+  `cand-${createHash('sha256').update(`${candidateType}:${component}:${content}`, 'utf8').digest('hex').slice(0, 16)}`
 
 function createStubContext({ services = {} } = {}) {
   const listeners = new Map()
@@ -1703,7 +1705,7 @@ test('28. edit-store — write/read, content addressed path, 0o600, idempotent, 
     const body = {
       schema: 'harness2-edit/v1',
       contentHash: hashOf(PERSONA_CONTENT),
-      candidateId: 'cand-1',
+      candidateId: candidateIdFor('invariant', 'system-prompt', PERSONA_CONTENT),
       candidateType: 'invariant',
       component: 'system-prompt',
       operation: 'set-persona-prefix',
@@ -1731,10 +1733,17 @@ test('28. edit-store — write/read, content addressed path, 0o600, idempotent, 
     assert.equal(second.written, false)
     assert.equal((await readdir(editsDir)).filter((entry) => entry.endsWith('.json')).length, 1)
 
+    // candidateId format/derivation guard.
+    const wrongIdErrors = plugin.validateEditBody({ ...body, candidateId: 'cand-1' })
+    assert.ok(wrongIdErrors.some((error) => error.includes('candidateId must be')))
+    const wrongDerivedErrors = plugin.validateEditBody({ ...body, candidateId: 'cand-0000000000000000' })
+    assert.ok(wrongDerivedErrors.some((error) => error.includes('derived candidate id')))
+    assert.equal(plugin.validateEditBody(body).length, 0)
+
     // Tampered content under the same hash is rejected on read.
     const tampered = path.join(dir, 'tampered')
     await mkdir(tampered, { recursive: true })
-    await writeFile(plugin.editBodyPath(tampered, hashOf(PERSONA_CONTENT)), `${JSON.stringify({ ...body, content: 'tampered content' })}\n`, 'utf8')
+    await writeFile(plugin.editBodyPath(tampered, hashOf(PERSONA_CONTENT)), `${JSON.stringify({ ...body, content: 'tampered content', candidateId: candidateIdFor('invariant', 'system-prompt', 'tampered content') })}\n`, 'utf8')
     const mismatch = await plugin.readEditBody(tampered, hashOf(PERSONA_CONTENT))
     assert.equal(mismatch.ok, false)
     assert.equal(mismatch.code, 'hash-mismatch')
@@ -1757,8 +1766,11 @@ test('28. edit-store — write/read, content addressed path, 0o600, idempotent, 
     }
 
     // verifyEditBodies is the compose/applied pre-check.
-    const candidates = [{ candidateId: 'cand-1', edit: { contentHash: hashOf(PERSONA_CONTENT) } }]
+    const candidates = [{ candidateId: candidateIdFor('invariant', 'system-prompt', PERSONA_CONTENT), edit: { contentHash: hashOf(PERSONA_CONTENT) } }]
     assert.equal((await plugin.verifyEditBodies(editsDir, candidates)).ok, true)
+    const wrongCandidate = await plugin.verifyEditBodies(editsDir, [{ candidateId: 'cand-0000000000000000', edit: { contentHash: hashOf(PERSONA_CONTENT) } }])
+    assert.equal(wrongCandidate.ok, false)
+    assert.equal(wrongCandidate.mismatched.length, 1)
     const missingBodies = await plugin.verifyEditBodies(editsDir, [{ candidateId: 'x', edit: { contentHash: hashOf('absent') } }])
     assert.equal(missingBodies.ok, false)
     assert.equal(missingBodies.missing.length, 1)
@@ -1818,7 +1830,7 @@ test('30. edit-store GC — old unreferenced deleted; referenced/fresh/invalid k
       const result = await plugin.writeEditBody({
         schema: 'harness2-edit/v1',
         contentHash: hash,
-        candidateId: 'cand-1',
+        candidateId: candidateIdFor('invariant', 'system-prompt', content),
         candidateType: 'invariant',
         component: 'system-prompt',
         operation: 'set-persona-prefix',
