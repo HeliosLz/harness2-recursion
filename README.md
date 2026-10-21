@@ -2,7 +2,7 @@
 
 Harness² 递归方案 —— 两个互相独立、可分别加载的 dsh 插件（**Round-6 冻结契约版本**）。
 
-| npm 包名（待发布） | 仓库目录 | 职责 |
+| npm 包名（已发布 0.2.1） | 仓库目录 | 职责 |
 | :-- | :-- | :-- |
 | `dsh-harness2-task-recursion` | [`packages/harness2-task-recursion`](packages/harness2-task-recursion) | 任务级递归：Propose → Probe → `probe/completed` → 确定性 Compose 门禁 → 账本 v3 → `compose/applied`/`compose/rejected` → 下一个 pre-step 应用 pendingPatch |
 | `dsh-harness2-meta-recursion` | [`packages/harness2-meta-recursion`](packages/harness2-meta-recursion) | Harnessing 级递归：消费结构化事件 → verified evaluation → 经验库 → 冻结只读门面 `harness2Experience` |
@@ -15,7 +15,7 @@ Harness² 递归方案 —— 两个互相独立、可分别加载的 dsh 插件
 ### 安装
 
 ```bash
-# npm 发布后
+# npm（0.2.1）
 dsh plugin --profile <name> add dsh-harness2-task-recursion
 dsh plugin --profile <name> add dsh-harness2-meta-recursion
 

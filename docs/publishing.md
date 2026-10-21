@@ -20,10 +20,9 @@ node e2e/run.mjs     # 需要 0.2.1 CLI 运行时，见 e2e/README.md
 
 ## 2. 包元数据
 
-> 2026-10-21 更新：两个 workspace 包的 npm 分发名已改为 `dsh-harness2-task-recursion` /
-> `dsh-harness2-meta-recursion`，`private` 已移除，`cordis.patch.yml` 的 `name` 已切换；
-> 插件导出的 `name` 与 row `id` 保持不变。`npm publish --dry-run` 通过，包版本 `0.2.1`。
-> **本机 npm 未登录（`npm whoami` → 401），因此实际 publish 尚未执行。**
+> 2026-10-21 更新：两个包已作为 **0.2.1** 发布到 npm：
+> `dsh-harness2-task-recursion@0.2.1`、`dsh-harness2-meta-recursion@0.2.1`（dist-tag latest）。
+> `private` 已移除，`cordis.patch.yml` 的 `name` 已切换；插件导出的 `name` 与 row `id` 保持不变。
 
 ### 2026-10-21 packaging validation
 
@@ -34,7 +33,7 @@ node e2e/run.mjs     # 需要 0.2.1 CLI 运行时，见 e2e/README.md
 - `npm run stage0:r6` → PASS（负向 0 applied / 20 rejected）。
 - `npm run stage0:r6:positive` → PASS（20/20 applied；4 controls + 2 trials/cycle）。
 - `npm pack --dry-run --workspace dsh-harness2-*` 与 `npm publish --dry-run` → PASS，版本 **0.2.1**。
-- 实际 publish 阻塞：`npm whoami` 401（未登录）；需要操作者 `npm login` 或配置 granular token。
+- 实际 publish 已完成：`helioslee` 账号发布两包 `0.2.1`；registry `dist-tags.latest=0.2.1`。
 
 
 **命名可用性检查（2026-10-19，本机 npm registry）**：
